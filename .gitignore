@@ -1,0 +1,14 @@
+# Dane wygenerowane przez scripts/build_data.py — zawierają rozkłady jazdy,
+# lokalizacje torów i stacji. Regulaminy źródeł (mkuran.pl, OSM/Overpass)
+# pozwalają na użycie danych, ale nie na ich redystrybucję w tym repo —
+# każdy klonujący ma sam odpalić build_data.py.
+mapa_polski/data/*.json
+mapa_polski/data/*.geojson
+
+__pycache__/
+*.pyc
+.DS_Store
+
+# cache pobranych surowych danych (Overpass), jeśli scripts/build_data.py go zostawi
+*_cache/
+overpass_railway_pl.json

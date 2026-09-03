@@ -1,0 +1,145 @@
+/* styles for panel.js (selected-train details, prefix pn-) */
+
+#details { --pn-color: var(--accent); }
+
+.pn-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.pn-chip {
+  flex: none;
+  width: 12px;
+  height: 12px;
+  margin-top: 5px;
+  border-radius: 50%;
+  background: var(--pn-color);
+}
+
+.pn-title {
+  flex: 1;
+  min-width: 0;
+}
+
+.pn-op {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.pn-train {
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.pn-rel {
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.pn-close {
+  flex: none;
+  padding: 3px 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: #fff;
+  color: var(--fg);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.pn-close:hover {
+  background: var(--bg);
+  border-color: var(--muted);
+}
+
+.pn-next {
+  margin: 10px 0 6px;
+  padding: 6px 8px;
+  border-radius: 4px;
+  background: var(--bg);
+  font-size: 13px;
+}
+
+.pn-next.pn-idle { color: var(--muted); }
+
+.pn-stops {
+  position: relative;
+  max-height: 45vh;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.pn-stop {
+  position: relative;
+  display: grid;
+  grid-template-columns: 16px 1fr auto;
+  align-items: baseline;
+  gap: 6px;
+  padding: 3px 4px 3px 0;
+  border-radius: 4px;
+  font-size: 13px;
+}
+
+/* vertical timeline connecting the stop dots */
+.pn-stop::before {
+  content: '';
+  position: absolute;
+  left: 7px;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: var(--pn-color);
+  opacity: 0.35;
+}
+
+.pn-stop:first-child::before { top: 50%; }
+.pn-stop:last-child::before { bottom: 50%; }
+
+.pn-dot {
+  position: relative;
+  z-index: 1;
+  width: 10px;
+  height: 10px;
+  justify-self: center;
+  align-self: center;
+  border: 2px solid var(--pn-color);
+  border-radius: 50%;
+  background: #fff;
+}
+
+.pn-name { overflow-wrap: anywhere; }
+
+.pn-time {
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.pn-time sup,
+.pn-next sup {
+  margin-left: 1px;
+  font-size: 9px;
+}
+
+.pn-passed { color: var(--muted); }
+
+.pn-passed .pn-dot {
+  background: var(--pn-color);
+  opacity: 0.5;
+}
+
+.pn-current {
+  font-weight: 700;
+  background: var(--bg);
+  background: color-mix(in srgb, var(--pn-color) 14%, #fff);
+}
+
+.pn-current .pn-dot {
+  width: 12px;
+  height: 12px;
+  background: var(--pn-color);
+  box-shadow: 0 0 0 2px #fff, 0 0 0 4px var(--pn-color);
+}

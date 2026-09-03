@@ -1,0 +1,228 @@
+/* styles for controls.js — search (#search), time slider (#time), operator filters (#filters), legend */
+
+:root {
+  --ct-sim: #d97706;
+  --ct-hover: #f1f5fb;
+}
+
+.ct-section-title {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+/* shared bits */
+.ct-btn {
+  padding: 6px 10px;
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  background: var(--accent);
+  color: #fff;
+  font: inherit;
+  line-height: 1.2;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.ct-btn:hover { filter: brightness(1.08); }
+.ct-btn--ghost { background: #fff; color: var(--accent); }
+.ct-btn:disabled { opacity: 0.45; cursor: default; filter: none; }
+
+.ct-link {
+  color: var(--accent);
+  font-size: 12px;
+  text-decoration: none;
+}
+.ct-link:hover { text-decoration: underline; }
+
+.ct-chip {
+  flex: none;
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  background: var(--muted);
+}
+
+/* ---------- search ---------- */
+.ct-search {
+  display: flex;
+  gap: 6px;
+  margin: 0;
+}
+.ct-search-input {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font: inherit;
+  color: var(--fg);
+  background: #fff;
+}
+.ct-search-input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(31, 111, 180, 0.15);
+}
+
+.ct-results {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  max-height: 240px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+.ct-results:empty { display: none; }
+.ct-result {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+}
+.ct-result:last-child { border-bottom: 0; }
+.ct-result:hover,
+.ct-result:focus { background: var(--ct-hover); outline: none; }
+.ct-result--selected,
+.ct-result--selected:hover { background: #e3eefa; box-shadow: inset 3px 0 0 var(--accent); }
+.ct-result--off { color: var(--muted); }
+.ct-result-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ct-result-num { font-weight: 600; }
+.ct-tag {
+  flex: none;
+  padding: 1px 6px;
+  border-radius: 10px;
+  font-size: 11px;
+  line-height: 1.4;
+  background: #eef0f3;
+  color: var(--muted);
+}
+.ct-tag--run { background: #e2f4e8; color: #1e7a3c; }
+.ct-tag--today { background: #e6f0fa; color: var(--accent); }
+.ct-empty { padding: 8px; }
+
+/* ---------- time slider ---------- */
+.ct-time-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.ct-time-label {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.ct-time--sim .ct-time-label { color: var(--ct-sim); }
+.ct-time-slider {
+  display: block;
+  width: 100%;
+  margin: 10px 0 2px;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+.ct-time--sim .ct-time-slider { accent-color: var(--ct-sim); }
+.ct-time-scale {
+  display: flex;
+  justify-content: space-between;
+  padding: 0 1px;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+}
+
+/* ---------- operator filters ---------- */
+.ct-filters-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+.ct-filters-links { font-size: 12px; color: var(--muted); }
+.ct-filters-list {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0;
+}
+.ct-filter-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 0;
+  cursor: pointer;
+}
+.ct-filter-label:hover { background: var(--ct-hover); }
+.ct-filter-label input {
+  flex: none;
+  margin: 0;
+  accent-color: var(--accent);
+}
+.ct-filter-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ct-filter-count { flex: none; font-size: 12px; }
+.ct-filter--hidden .ct-filter-name { color: var(--muted); }
+.ct-filter--hidden .ct-chip { opacity: 0.35; }
+
+/* ---------- legend (Leaflet control, bottom-right) ---------- */
+.ct-legend {
+  min-width: 150px;
+  max-width: 220px;
+  padding: 8px 10px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.2);
+  font-size: 12px;
+  line-height: 1.4;
+}
+.ct-legend-title {
+  margin-bottom: 4px;
+  font-weight: 600;
+  color: var(--muted);
+}
+.ct-legend-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 2px 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  color: var(--fg);
+  text-align: left;
+  cursor: pointer;
+}
+.ct-legend-item:hover .ct-legend-name { text-decoration: underline; }
+.ct-legend-item--hidden { opacity: 0.45; }
+.ct-legend-item--hidden .ct-legend-name { text-decoration: line-through; }
+.ct-legend-item--hidden:hover .ct-legend-name { text-decoration: line-through underline; }
+.ct-legend-arrow {
+  flex: none;
+  width: 12px;
+  height: 12px;
+  background: var(--muted);
+  clip-path: polygon(50% 0, 100% 100%, 50% 72%, 0 100%);
+}
+.ct-legend-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ct-legend-more {
+  display: inline-block;
+  margin-top: 4px;
+}

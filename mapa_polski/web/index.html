@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="pl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Mapa Polski – pociągi</title>
+  <link rel="stylesheet" href="/static/leaflet/leaflet.css">
+  <link rel="stylesheet" href="/static/app.css">
+  <link rel="stylesheet" href="/static/layers.css">
+  <link rel="stylesheet" href="/static/trains.css">
+  <link rel="stylesheet" href="/static/panel.css">
+  <link rel="stylesheet" href="/static/controls.css">
+</head>
+<body>
+  <aside id="panel">
+    <header id="panel-header">
+      <h1>Mapa Polski</h1>
+      <p class="muted">Pociągi pasażerskie wg rozkładu jazdy</p>
+    </header>
+    <section id="search" aria-label="Wyszukiwarka pociągów"></section>
+    <section id="time" aria-label="Suwak czasu"></section>
+    <section id="filters" aria-label="Filtr przewoźników"></section>
+    <section id="details" aria-label="Szczegóły pociągu">
+      <p class="muted">Kliknij pociąg na mapie, aby zobaczyć szczegóły.</p>
+    </section>
+  </aside>
+  <main id="map-wrap">
+    <div id="map"></div>
+    <div id="status" class="muted"></div>
+  </main>
+
+  <script src="/static/leaflet/leaflet.js"></script>
+  <script src="/static/app.js"></script>
+  <script src="/static/layers.js"></script>
+  <script src="/static/trains.js"></script>
+  <script src="/static/panel.js"></script>
+  <script src="/static/controls.js"></script>
+</body>
+</html>
