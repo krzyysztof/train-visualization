@@ -14,7 +14,9 @@ Atomic writes (a failed download/validation never clobbers existing data). Exit 
 
 PIPELINE 1: TRACKS -> tory.geojson
 Source: OpenStreetMap/Overpass (ODbL). Query: every ``railway=rail`` way in Poland
-without a ``service=*`` tag (drops yards/sidings/spurs; ~28k ways, ~49MB response).
+without a ``service=*`` tag (drops yards/sidings/spurs; ~28k ways, ~49MB response;
+also used by pipeline 2 below for real speed limits, so it is fetched once and
+shared if either --tracks or --trains is requested).
 Processing: merge ways into chains through 2-way junctions only, simplify per chain
 (local equirectangular projection, 12m prefilter + Douglas-Peucker 50m), round to
 4 decimals, drop degenerate chains.
@@ -25,7 +27,15 @@ Consumer: ``web/static/layers.js`` (fetches ``/data/tory.geojson``).
 PIPELINE 2: TRAINS -> stacje.json + pociagi.json
 Source: mkuran.pl/gtfs/polish_trains.zip (CC BY 4.0, PKP PLK data). route_type=3
 (bus substitutions) excluded. GTFS "HH:MM:SS" (HH may exceed 24) -> int seconds
-since midnight of the service day.
+since midnight of the service day. Each shape point is also matched to the nearest OSM way
+(within 60m) carrying a numeric ``maxspeed`` tag, so trains.py's physics model can cap speed
+at the real posted limit instead of only a per-category cruise speed. (A curve-radius cap
+computed from the shape geometry itself was tried and dropped: point-to-point curvature on
+both the GTFS shape points and the OSM way nodes is dominated by digitisation noise — real
+radius doesn't swing between ~800m and ~200,000m across a few consecutive points — and
+widening the baseline to average that noise out just made it agree with the real OSM tags
+less often, not more.) Best-effort: if Overpass is unavailable, --trains still succeeds with
+no speed limits (falls back to the old category-only behaviour).
 
 stacje.json — array, ARRAY INDEX = station index used by trips:
     [{"id", "name", "lat", "lon"}, ...]   (only referenced stops, sorted by stop_id, 5 decimals)
@@ -34,6 +44,7 @@ pociagi.json:
     {"generated_from", "feed_start_date", "feed_end_date",   # int YYYYMMDD
      "calendars": [{"on":[YYYYMMDD,...], "off":[...]?}, ...],   # indexed by trips[].cal
      "shapes": [[[lon,lat],...], ...],                          # indexed by trips[].shape, DP 70m
+     "shape_maxspeed": [[kmh|null,...], ...],           # parallel to shapes: OSM limit per point
      "trips": [{"id", "op", "route", "num", "dest",
                 "cal":[cal_idx,...], "shape": idx?, "n": count?,
                 "stops":[[station_idx, dep_sec, arr_sec], ...]},  # NOTE: dep THEN arr
@@ -326,9 +337,20 @@ def fetch_overpass(cache_dir, keep):
     raise DownloadError("tracks: all Overpass endpoints failed: " + " | ".join(errors))
 
 
+def _parse_maxspeed_kmh(value):
+    """OSM ``maxspeed`` tag -> plain int km/h, or None (missing, "walk", "40 mph", "80;100", ...)."""
+    if value and value.strip().isdigit():
+        kmh = int(value.strip())
+        if 5 <= kmh <= 400:
+            return kmh
+    return None
+
+
 def parse_overpass_ways(data):
-    """{way_id: (node_ids, [(lon, lat), ...])} for every usable way in an Overpass answer."""
+    """{way_id: (node_ids, [(lon, lat), ...])} for every usable way, plus {way_id: maxspeed_kmh}
+    for those carrying a clean numeric maxspeed tag (used to build the speed-limit index)."""
     ways = {}
+    maxspeed_by_way = {}
     skipped = 0
     for el in data.get("elements", ()):
         if el.get("type") != "way":
@@ -343,9 +365,67 @@ def parse_overpass_ways(data):
             skipped += 1
             continue
         ways[el["id"]] = ([nid for nid, _ in pairs], [pt for _, pt in pairs])
+        kmh = _parse_maxspeed_kmh((el.get("tags") or {}).get("maxspeed"))
+        if kmh is not None:
+            maxspeed_by_way[el["id"]] = kmh
     if skipped:
         log(f"tracks: skipped {skipped} ways with unusable geometry")
-    return ways
+    return ways, maxspeed_by_way
+
+
+SPEED_GRID_DEG = 0.01  # ~700x1100m cells at PL latitudes; bucket for nearest-segment lookup below
+SPEED_MATCH_RADIUS_M = 60.0  # a shape point beyond this from any tagged way gets no speed limit
+
+
+def build_speed_index(ways, maxspeed_by_way):
+    """Flat (lon1,lat1,lon2,lat2,kmh) segments from tagged OSM ways, bucketed into a coarse
+    lon/lat grid so matching a shape point to the nearest one stays fast at country scale."""
+    segments = []
+    grid = collections.defaultdict(list)
+    for wid, kmh in maxspeed_by_way.items():
+        points = ways.get(wid, (None, None))[1]
+        if not points:
+            continue
+        for i in range(len(points) - 1):
+            (lon1, lat1), (lon2, lat2) = points[i], points[i + 1]
+            seg_idx = len(segments)
+            segments.append((lon1, lat1, lon2, lat2, kmh))
+            x0, x1 = sorted((int(lon1 // SPEED_GRID_DEG), int(lon2 // SPEED_GRID_DEG)))
+            y0, y1 = sorted((int(lat1 // SPEED_GRID_DEG), int(lat2 // SPEED_GRID_DEG)))
+            for cx in range(x0, x1 + 1):
+                for cy in range(y0, y1 + 1):
+                    grid[(cx, cy)].append(seg_idx)
+    log(f"trains: speed-limit index: {len(segments)} tagged segments from {len(maxspeed_by_way)}/"
+        f"{len(ways)} ways")
+    return segments, grid
+
+
+def _point_segment_dist_m(px, py, ax, ay, bx, by, kx, ky):
+    """Distance in metres from point (px,py) to segment a-b, all given as lon/lat degrees."""
+    pxm, pym, axm, aym, bxm, bym = px * kx, py * ky, ax * kx, ay * ky, bx * kx, by * ky
+    dx, dy = bxm - axm, bym - aym
+    seg2 = dx * dx + dy * dy
+    if seg2 == 0:
+        return math.hypot(pxm - axm, pym - aym)
+    t = max(0.0, min(1.0, ((pxm - axm) * dx + (pym - aym) * dy) / seg2))
+    return math.hypot(axm + t * dx - pxm, aym + t * dy - pym)
+
+
+def nearest_maxspeed(speed_index, lon, lat):
+    """Speed limit (km/h) of the nearest tagged OSM segment within SPEED_MATCH_RADIUS_M, or None."""
+    segments, grid = speed_index
+    kx = EARTH_RADIUS_M * math.radians(1.0) * math.cos(math.radians(lat))
+    ky = EARTH_RADIUS_M * math.radians(1.0)
+    cx, cy = int(lon // SPEED_GRID_DEG), int(lat // SPEED_GRID_DEG)
+    best_d, best_kmh = None, None
+    for dx in (-1, 0, 1):
+        for dy in (-1, 0, 1):
+            for seg_idx in grid.get((cx + dx, cy + dy), ()):
+                lon1, lat1, lon2, lat2, kmh = segments[seg_idx]
+                d = _point_segment_dist_m(lon, lat, lon1, lat1, lon2, lat2, kx, ky)
+                if best_d is None or d < best_d:
+                    best_d, best_kmh = d, kmh
+    return best_kmh if best_d is not None and best_d <= SPEED_MATCH_RADIUS_M else None
 
 
 def merge_ways(ways):
@@ -418,14 +498,10 @@ def merge_ways(ways):
     return chains
 
 
-def build_tracks(out_dir, cache_dir, keep):
+def build_tracks(out_dir, ways):
     out_path = Path(out_dir) / TRACKS_FILE
-    log("tracks: querying Overpass (railway=rail without service=*, Poland)")
-    raw_path, data = fetch_overpass(cache_dir, keep)
-    ways = parse_overpass_ways(data)
     raw_points = sum(len(coords) for _, coords in ways.values())
     log(f"tracks: {len(ways)} ways, {raw_points} points before merging")
-    del data
 
     chains = merge_ways(ways)
     log(f"tracks: merged into {len(chains)} chains; simplifying (prefilter {TRACK_PREFILTER_M:g} m, "
@@ -443,7 +519,6 @@ def build_tracks(out_dir, cache_dir, keep):
     collection = {"type": "FeatureCollection", "features": features}
     size = write_json_atomic(out_path, collection)
     log(f"tracks: wrote {out_path} ({size / 1e3:.0f} KB)")
-    discard_cache(raw_path, keep)
     validate_tracks(out_path)
 
 
@@ -516,7 +591,7 @@ def expand_calendar(row, feed_start, feed_end):
     return dates
 
 
-def build_trains(out_dir, cache_dir, keep):
+def build_trains(out_dir, cache_dir, keep, speed_index):
     out_dir = Path(out_dir)
     zip_path = fetch(GTFS_URL, Path(cache_dir) / "polish_trains.zip", keep, label="trains")
     zf = zipfile.ZipFile(zip_path)
@@ -668,6 +743,16 @@ def build_trains(out_dir, cache_dir, keep):
         log(f"trains: WARNING {len(missing_shapes)} shape_ids referenced by trips are absent from shapes.txt")
     log(f"trains: shapes simplified to {sum(len(s) for s in shapes)} points")
 
+    if speed_index is not None:
+        shape_maxspeed = [[nearest_maxspeed(speed_index, lon, lat) for lon, lat in shape] for shape in shapes]
+        matched = sum(1 for row in shape_maxspeed for v in row if v is not None)
+        total = sum(len(row) for row in shape_maxspeed)
+        pct = matched / total * 100 if total else 0.0
+        log(f"trains: matched OSM speed limits for {matched}/{total} shape points ({pct:.0f}%)")
+    else:
+        shape_maxspeed = [[None] * len(shape) for shape in shapes]
+        log("trains: no OSM speed-limit index available; shapes carry no speed limits")
+
     # Trip records, merging identical trips.
     groups = {}
     for trip_id, seq in trip_stops.items():
@@ -705,6 +790,7 @@ def build_trains(out_dir, cache_dir, keep):
         "feed_end_date": feed_end,
         "calendars": calendars,
         "shapes": shapes,
+        "shape_maxspeed": shape_maxspeed,
         "trips": trips,
         "feed_version": feed_version,
     }
@@ -735,7 +821,8 @@ def validate_trains(out_dir):
         if set(st) != {"id", "name", "lat", "lon"} or not isinstance(st["id"], str):
             problem(f"station {i}: bad keys")
             break
-    for key in ("generated_from", "feed_start_date", "feed_end_date", "calendars", "shapes", "trips", "feed_version"):
+    for key in ("generated_from", "feed_start_date", "feed_end_date", "calendars", "shapes",
+                "shape_maxspeed", "trips", "feed_version"):
         if key not in data:
             problem(f"pociagi.json lacks {key!r}")
     if problems:
@@ -745,6 +832,7 @@ def validate_trains(out_dir):
         problem("feed_start_date/feed_end_date are not ordered ints")
 
     calendars, shapes, trips = data["calendars"], data["shapes"], data["trips"]
+    shape_maxspeed = data["shape_maxspeed"]
     for i, cal in enumerate(calendars):
         for field in ("on", "off"):
             dates = cal.get(field, [])
@@ -755,6 +843,12 @@ def validate_trains(out_dir):
     for i, shape in enumerate(shapes):
         if not shape or any(len(p) != 2 for p in shape):
             problem(f"shape {i}: empty or malformed")
+    if len(shape_maxspeed) != len(shapes):
+        problem("shape_maxspeed length does not match shapes")
+    else:
+        for i, (shape, row) in enumerate(zip(shapes, shape_maxspeed)):
+            if len(row) != len(shape) or any(v is not None and not (5 <= v <= 400) for v in row):
+                problem(f"shape_maxspeed {i}: malformed or out-of-range values")
     n_stations, n_cal, n_shapes = len(stations), len(calendars), len(shapes)
     merged_from = 0
     for i, trip in enumerate(trips):
@@ -840,20 +934,39 @@ def main(argv=None):
         f"({'kept' if args.keep_downloads else 'discarded after use'})")
 
     failures = {}
+
+    # Both pipelines can use the same Overpass railway data (tracks: to draw it; trains: to
+    # read real speed limits off it), so it is fetched/parsed once and shared.
+    overpass_ways = overpass_maxspeed = overpass_raw_path = None
+    if args.tracks or args.trains:
+        log("querying Overpass (railway=rail without service=*, Poland)")
+        try:
+            overpass_raw_path, raw = fetch_overpass(args.cache_dir, args.keep_downloads)
+            overpass_ways, overpass_maxspeed = parse_overpass_ways(raw)
+            del raw
+        except DownloadError as e:
+            log(f"ERROR {e}")
+            if args.tracks:
+                failures["tracks"] = e
+            if args.trains:
+                log("trains: continuing without OSM speed-limit enrichment (Overpass unavailable)")
+
     if args.trains:
         try:
-            build_trains(args.out, args.cache_dir, args.keep_downloads)
+            speed_index = build_speed_index(overpass_ways, overpass_maxspeed) if overpass_ways else None
+            build_trains(args.out, args.cache_dir, args.keep_downloads, speed_index)
         except (DownloadError, ValidationError) as e:
             log(f"ERROR {e}")
             failures["trains"] = e
-    if args.tracks:
+    if args.tracks and "tracks" not in failures:
         try:
-            build_tracks(args.out, args.cache_dir, args.keep_downloads)
-        except (DownloadError, ValidationError) as e:
+            build_tracks(args.out, overpass_ways)
+        except ValidationError as e:
             log(f"ERROR {e}")
-            if isinstance(e, DownloadError):
-                log(f"tracks: existing {args.out / TRACKS_FILE} left untouched")
+            log(f"tracks: existing {args.out / TRACKS_FILE} left untouched")
             failures["tracks"] = e
+    if overpass_raw_path:
+        discard_cache(overpass_raw_path, args.keep_downloads)
 
     if not failures:
         log("done: all requested outputs built and validated")

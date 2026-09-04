@@ -97,7 +97,9 @@ def _radius_of_curvature_m(prev, cur, nxt, lat_ref):
 
 
 def _lerp(a, b, t):
-    return a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t
+    """Interpolates a (lon, lat, maxspeed_kmh|None) point; maxspeed is a step function (nearer
+    endpoint's value), not blended, since a speed limit doesn't average across a boundary."""
+    return a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, (a[2] if t < 0.5 else b[2])
 
 
 def _ease_in_out(t):
@@ -128,7 +130,7 @@ class TrainSchedule:
             data = json.load(f)
         self.feed_start_date = data.get("feed_start_date")
         self.feed_end_date = data.get("feed_end_date")
-        self.shapes = data["shapes"]
+        self.shapes = self._zip_shape_maxspeed(data["shapes"], data.get("shape_maxspeed"))
         self.trips = data["trips"]
         self.calendar_sets = [set(cal["on"]) - set(cal.get("off", ())) for cal in data["calendars"]]
 
@@ -137,6 +139,19 @@ class TrainSchedule:
         self._origins_by_trip = {}  # trip_idx -> [origin_date_int, ...]
         self._shape_anchor_cache = {}  # trip_idx -> per stop (segment index, t within it, along-track distance)
         self._speed_profile_cache = {}  # (trip_idx, stop_i) -> _build_speed_profile() result
+
+    @staticmethod
+    def _zip_shape_maxspeed(shapes, shape_maxspeed):
+        """[[lon,lat],...] + [[kmh|None,...],...] -> [[(lon,lat,kmh|None),...],...]; tolerates a
+        missing/mismatched shape_maxspeed (older data file) by treating every point as unlimited."""
+        if not shape_maxspeed or len(shape_maxspeed) != len(shapes):
+            shape_maxspeed = [None] * len(shapes)
+        zipped = []
+        for shape, speeds in zip(shapes, shape_maxspeed):
+            if not speeds or len(speeds) != len(shape):
+                speeds = [None] * len(shape)
+            zipped.append([(lon, lat, kmh) for (lon, lat), kmh in zip(shape, speeds)])
+        return zipped
 
     # -- candidate trips for a given day ---------------------------------------
 
@@ -345,12 +360,12 @@ class TrainSchedule:
 
     @staticmethod
     def _build_speed_profile(points, span_sec, route):
-        """Speed cap at each point = min(category cruise, curve radius, accel/decel kinematics),
-        then the whole profile is rescaled so total time matches the schedule exactly — only
-        redistributes real scheduled duration, never invents time."""
+        """Speed cap at each point = min(category cruise, real OSM limit if known, curve radius,
+        accel/decel kinematics), then the whole profile is rescaled so total time matches the
+        schedule exactly — only redistributes real scheduled duration, never invents time."""
         n = len(points)
         lat_ref = points[0][1]
-        lengths_m = [_meters(*points[i], *points[i + 1]) for i in range(n - 1)]
+        lengths_m = [_meters(points[i][0], points[i][1], points[i + 1][0], points[i + 1][1]) for i in range(n - 1)]
 
         cum_m = [0.0] * n
         for i in range(1, n):
@@ -363,6 +378,9 @@ class TrainSchedule:
 
         v_target = [cruise_mps] * n
         for i in range(n):
+            limit_kmh = points[i][2]
+            if limit_kmh is not None:
+                v_target[i] = min(v_target[i], limit_kmh / 3.6)
             if 0 < i < n - 1:
                 radius = _radius_of_curvature_m(points[i - 1], points[i], points[i + 1], lat_ref)
                 if radius is not None:
@@ -402,12 +420,12 @@ class TrainSchedule:
             if cum_time[i] <= elapsed_sec <= cum_time[i + 1]:
                 seg_span = cum_time[i + 1] - cum_time[i]
                 t = 0.0 if seg_span <= 0 else (elapsed_sec - cum_time[i]) / seg_span
-                ax, ay = points[i]
-                bx, by = points[i + 1]
+                ax, ay = points[i][0], points[i][1]
+                bx, by = points[i + 1][0], points[i + 1][1]
                 lon, lat = ax + (bx - ax) * t, ay + (by - ay) * t
                 speed_kmh = v_kmh[i] + (v_kmh[i + 1] - v_kmh[i]) * t
                 return lon, lat, _bearing(ax, ay, bx, by), speed_kmh
-        ax, ay = points[-1]
+        ax, ay = points[-1][0], points[-1][1]
         return ax, ay, None, 0.0
 
     @staticmethod
@@ -430,7 +448,7 @@ class TrainSchedule:
         simplification can put that km away, causing teleports). Returns (segment index, t,
         along-track distance) per stop; picks the pass that keeps stops monotonic along the track."""
         kx = math.cos(math.radians(shape[0][1]))  # shrink longitudes so distances are isotropic
-        pts = [(x * kx, y) for x, y in shape]
+        pts = [(p[0] * kx, p[1]) for p in shape]
         seg_len, cum = [], [0.0]
         for i in range(len(pts) - 1):
             seg_len.append(_dist(*pts[i], *pts[i + 1]))
