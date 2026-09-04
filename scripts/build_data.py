@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Regenerate the baked data files that the Mapa Polski app reads from mapa_polski/data/.
+"""Regenerate the baked data files that the Mapa Polski app reads from train_visualization/data/.
 
 The app itself never touches the network: it only ``json.load``s the files produced here.
 This script is the single, reproducible source of those files. It needs nothing beyond the
@@ -10,7 +10,7 @@ Usage
     python3 scripts/build_data.py                    # both pipelines (default)
     python3 scripts/build_data.py --trains           # only stacje.json + pociagi.json
     python3 scripts/build_data.py --tracks           # only tory.geojson
-    python3 scripts/build_data.py --out DIR          # write somewhere else (default: mapa_polski/data)
+    python3 scripts/build_data.py --out DIR          # write somewhere else (default: train_visualization/data)
     python3 scripts/build_data.py --keep-downloads   # cache raw downloads so re-runs skip the network
     python3 scripts/build_data.py --cache-dir DIR    # where raw downloads are cached (default: system temp dir)
 
@@ -52,7 +52,8 @@ Output schema (compact JSON, ``separators=(",", ":")``):
          "geometry": {"type": "LineString", "coordinates": [[lon, lat], ...]}},
         ...]}
 
-Consumer: ``mapa_polski/map_canvas.py`` (``_load_tracks`` reads ``features[].geometry.coordinates``).
+Consumer: ``train_visualization/web/static/layers.js`` (fetches ``/data/tory.geojson`` and reads
+``features[].geometry.coordinates`` for each rail line).
 
 Pipeline 2: TRAINS  ->  stacje.json + pociagi.json
 --------------------------------------------------
@@ -106,7 +107,7 @@ pociagi.json:
   * Trips with fewer than two stops, an unknown stop_id or non-monotonic times are
     dropped with a warning.
 
-Consumer: ``mapa_polski/trains.py`` (``TrainSchedule``).
+Consumer: ``train_visualization/trains.py`` (``TrainSchedule``).
 
 Validation
 ----------
@@ -135,8 +136,8 @@ import zipfile
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-DEFAULT_OUT_DIR = REPO_ROOT / "mapa_polski" / "data"
-DEFAULT_CACHE_DIR = Path(tempfile.gettempdir()) / "mapa-polski-build-cache"
+DEFAULT_OUT_DIR = REPO_ROOT / "train_visualization" / "data"
+DEFAULT_CACHE_DIR = Path(tempfile.gettempdir()) / "train-visualization-build-cache"
 
 GTFS_URL = "https://mkuran.pl/gtfs/polish_trains.zip"
 OVERPASS_ENDPOINTS = [
@@ -148,7 +149,7 @@ area["ISO3166-1"="PL"][admin_level=2]->.pl;
 ( way["railway"="rail"]["service"!~"."](area.pl); );
 out geom;
 """
-USER_AGENT = "mapa-polski build_data.py (Python stdlib urllib)"
+USER_AGENT = "train-visualization build_data.py (Python stdlib urllib)"
 
 TRACKS_FILE = "tory.geojson"
 STATIONS_FILE = "stacje.json"
@@ -862,9 +863,9 @@ def smoke_test_consumer(out_dir):
     """Loads the files through the app's own TrainSchedule, exactly as the app does."""
     sys.path.insert(0, str(REPO_ROOT))
     try:
-        import mapa_polski.trains as trains_mod  # stdlib-only module, safe to import headless
+        import train_visualization.trains as trains_mod  # stdlib-only module, safe to import headless
     except ImportError as e:
-        log(f"trains: consumer smoke test skipped (cannot import mapa_polski.trains: {e})")
+        log(f"trains: consumer smoke test skipped (cannot import train_visualization.trains: {e})")
         return
     trains_mod.STATIONS_PATH = Path(out_dir) / STATIONS_FILE
     trains_mod.TRAINS_PATH = Path(out_dir) / TRAINS_FILE

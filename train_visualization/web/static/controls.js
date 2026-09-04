@@ -48,9 +48,9 @@
     var form = el('form', 'ct-search');
     var input = el('input', 'ct-search-input');
     input.type = 'search';
-    input.placeholder = 'Numer pociągu lub kierunek…';
+    input.placeholder = 'Numer, kategoria, stacja…';
     input.autocomplete = 'off';
-    input.setAttribute('aria-label', 'Numer pociągu lub kierunek');
+    input.setAttribute('aria-label', 'Szukaj pociągu: numer, kategoria, stacja początkowa lub docelowa');
     var button = el('button', 'ct-btn', 'Szukaj');
     button.type = 'submit';
     var list = el('ol', 'ct-results');

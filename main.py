@@ -1,12 +1,9 @@
-"""Entry point: `python main.py` starts a local server and opens the map in your browser.
-
-The old Tkinter window is still available with `python -m mapa_polski.app`.
-"""
+"""Entry point: `python main.py` starts a local server and opens the map in your browser."""
 import argparse
 import threading
 import webbrowser
 
-from mapa_polski.server import create_server
+from train_visualization.server import create_server
 
 
 def main():

@@ -14,8 +14,6 @@ nie przy uruchomieniu).
 - Python 3.9+ — **bez żadnych pakietów pip** (serwer to `http.server`, dane to `json`).
 - Przeglądarka (Firefox/Chrome/Edge). Leaflet jest w repo, więc jedyny ruch
   sieciowy w trakcie pracy to kafelki mapy z OpenStreetMap.
-- Tkinter potrzebny tylko do starego okienkowego UI (`python -m mapa_polski.app`),
-  które zostało jako wersja zapasowa.
 
 ## Uruchomienie
 
@@ -36,8 +34,9 @@ Serwer nasłuchuje na `http://127.0.0.1:8765/` (pierwszy wolny port od 8765;
 - **Kliknięcie pociągu**: panel po lewej pokazuje przewoźnika, numer, relację,
   pełną listę stacji z godzinami, podświetloną następną stację i czas do niej,
   a na mapie rysuje się trasa pociągu. `✕` zamyka; kliknięcie w tło mapy odznacza.
-- **Wyszukiwarka**: numer pociągu lub kierunek → lista wyników („w trasie" /
-  „dziś"); kliknięcie wybiera pociąg i centruje na nim mapę.
+- **Wyszukiwarka**: numer pociągu (`5350`), kategoria (`EIC`, `R2`), nazwa
+  („Kaszub") albo stacja początkowa/docelowa („Zakopane") → lista wyników
+  („w trasie" / „dziś"); kliknięcie wybiera pociąg i centruje na nim mapę.
 - **Filtr przewoźników**: pola wyboru, „wszystkie" / „żaden".
 - **Suwak czasu**: przewiń dobę, żeby zobaczyć, gdzie pociągi są np. o 7:30
   (pasek statusu pokazuje „Symulacja HH:MM:SS"); „Teraz" wraca do zegara.
@@ -47,11 +46,11 @@ Serwer nasłuchuje na `http://127.0.0.1:8765/` (pierwszy wolny port od 8765;
 ## Struktura projektu
 
 ```
-mapa-polski/
+train-visualization/
 ├── main.py                        punkt wejścia: serwer + przeglądarka
 ├── scripts/
 │   └── build_data.py              regeneracja danych (GTFS + OSM) — patrz „Odświeżanie danych"
-├── mapa_polski/
+├── train_visualization/
 │   ├── server.py                  serwer HTTP i JSON API (opis endpointów w docstringu)
 │   ├── trains.py                  silnik: pozycje, kierunek, trasa, ETA, wyszukiwanie
 │   ├── web/
@@ -68,7 +67,6 @@ mapa-polski/
 │   │   ├── tory.geojson           sieć linii kolejowych (OpenStreetMap, ODbL)
 │   │   ├── stacje.json            stacje: id, nazwa, lat, lon (GTFS)
 │   │   └── pociagi.json           rozkład jazdy: kalendarze, kształty tras, kursy (GTFS)
-│   ├── app.py, map_canvas.py      stare UI Tkinter (`python -m mapa_polski.app`)
 └── README.md
 ```
 
@@ -85,7 +83,7 @@ mapa-polski/
   rozgłasza zdarzenia (`positions`, `select`, `time`, `filter`, `zoom`, `move`);
   każdy moduł tylko na nie reaguje i zmienia stan przez `App.select`,
   `App.setSimTime`, `App.setOperatorHidden`. Kontrakt jest opisany na początku
-  [app.js](mapa_polski/web/static/app.js).
+  [app.js](train_visualization/web/static/app.js).
 
 ## Dane geograficzne
 
@@ -94,7 +92,7 @@ Granice województw pochodzą z projektu
 (licencja MIT), który udostępnia dane Głównego Urzędu Geodezji i Kartografii
 w formacie GeoJSON.
 
-Sieć linii kolejowych (`mapa_polski/data/tory.geojson`) pochodzi z bazy
+Sieć linii kolejowych (`train_visualization/data/tory.geojson`) pochodzi z bazy
 OpenStreetMap — dane pobrano przez Overpass API (linie o tagu `railway=rail`
 na terenie Polski, z pominięciem torów bocznicowych i manewrowych) i
 uproszczono geometrię algorytmem Douglasa-Peuckera do tolerancji ok. 50 m.
@@ -108,12 +106,12 @@ utrzymywane przez wolontariuszy — użycie osobiste/hobbystyczne jest w porząd
 ale przy publicznym wdrożeniu należy przejść na własny/komercyjny dostawca kafelków
 zgodnie z <https://operations.osmfoundation.org/policies/tiles/>.
 
-Biblioteka Leaflet (`mapa_polski/web/static/leaflet/`) jest na licencji
+Biblioteka Leaflet (`train_visualization/web/static/leaflet/`) jest na licencji
 BSD-2-Clause (© Volodymyr Agafonkin) — tekst licencji leży obok plików.
 
 ## Dane o pociągach
 
-Pozycje pociągów (`mapa_polski/data/pociagi.json`, `stacje.json`) są wyliczane
+Pozycje pociągów (`train_visualization/data/pociagi.json`, `stacje.json`) są wyliczane
 offline na podstawie statycznego rozkładu jazdy GTFS pobranego z
 [mkuran.pl/gtfs](https://mkuran.pl/gtfs/) (licencja **CC BY 4.0**),
 agregującego dane rozkładowe PKP PLK oraz przewoźników (PolRegio, PKP
@@ -131,7 +129,7 @@ faktycznie się znajduje.
 
 **Ani przy starcie, ani podczas przeglądania mapy — aplikacja nigdy sama nie
 pobiera rozkładu ani torów.** Zostały one pobrane i przetworzone skryptem
-`scripts/build_data.py` do statycznych plików w `mapa_polski/data/`; serwer
+`scripts/build_data.py` do statycznych plików w `train_visualization/data/`; serwer
 tylko czyta te pliki z dysku. Jedyne, co w trakcie pracy idzie przez sieć, to
 kafelki mapy z OpenStreetMap, które ściąga przeglądarka. Odpytywanie
 `/api/positions` co sekundę to lokalne obliczenia na już wczytanym rozkładzie.
@@ -186,5 +184,3 @@ integrację to `server.py` (okresowe pobieranie opóźnień) i
 - Nowa informacja w API → `server.py` (`_handle_api`) i `trains.py`.
 - Nowa warstwa/kontrolka na mapie → osobny plik w `web/static/`, dopisany do
   `index.html`, reagujący na zdarzenia `App.on(...)` z `app.js`.
-- Stare UI Tkinter (`app.py`, `map_canvas.py`) korzysta z tego samego
-  `trains.py`, więc dalej działa, ale nowe funkcje trafiają tylko do wersji web.

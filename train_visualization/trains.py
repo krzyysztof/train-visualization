@@ -22,6 +22,21 @@ def _dist(ax, ay, bx, by):
     return math.hypot(bx - ax, by - ay)
 
 
+def _lerp(a, b, t):
+    return a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t
+
+
+def _ease_in_out(t):
+    """Maps a linear time-fraction (0..1) to a slow-start/slow-end travel-fraction.
+
+    Real trains accelerate out of a station and brake into the next one rather than
+    holding a constant speed; the schedule only gives us total travel time, not a
+    speed profile, so this is a plausible curve, not a measured one. Zero derivative
+    at both ends (t=0 and t=1) gives the "starts and ends at rest" look.
+    """
+    return 0.5 - 0.5 * math.cos(math.pi * t)
+
+
 def _bearing(ax, ay, bx, by):
     """Compass bearing in degrees (0 = north, 90 = east) from lon/lat A to lon/lat B."""
     east = (bx - ax) * math.cos(math.radians((ay + by) / 2))
@@ -52,7 +67,7 @@ class TrainSchedule:
         self._candidates_date = None
         self._candidates = []  # list of (trip_idx, origin_date_int)
         self._origins_by_trip = {}  # trip_idx -> [origin_date_int, ...]
-        self._shape_index_cache = {}  # trip_idx -> nearest shape-point index per stop
+        self._shape_anchor_cache = {}  # trip_idx -> per stop (segment index, t within it, along-track distance)
 
     # -- candidate trips for a given day ---------------------------------------
 
@@ -65,7 +80,9 @@ class TrainSchedule:
             active = set()
             for cal_idx in trip["cal"]:
                 active |= self.calendar_sets[cal_idx]
-            for origin in (today_int, yesterday_int):
+            # Yesterday's service only matters if the trip runs past midnight into today.
+            origins_to_check = (today_int, yesterday_int) if trip["stops"][-1][2] > DAY else (today_int,)
+            for origin in origins_to_check:
                 if origin in active:
                     candidates.append((idx, origin))
                     origins.setdefault(idx, []).append(origin)
@@ -134,18 +151,24 @@ class TrainSchedule:
         scored = []
         for trip_idx, trip in enumerate(self.trips):
             num = str(trip.get("num", "")).lower()
+            route = str(trip.get("route", "")).lower()
             dest = str(trip.get("dest", "")).lower()
+            origin = self.stations[trip["stops"][0][0]]["name"].lower()
             if q == num:
                 rank = 0
             elif num.startswith(q):
                 rank = 1
-            elif q in num or q in dest:
+            elif q in num or q in dest or q in origin:
                 rank = 2
+            elif q == route or f"{route} {num}".startswith(q):
+                # The label on the map reads "EIC 5350/1", so people search for the category too.
+                rank = 3
             else:
                 continue
             is_running = trip_idx in running
             is_today = trip_idx in self._origins_by_trip
-            scored.append((0 if is_running else 1, 0 if is_today else 1, rank, trip_idx, is_running, is_today))
+            # Match quality first (an exact train number must win), then what is on the map now.
+            scored.append((rank, 0 if is_running else 1, 0 if is_today else 1, trip_idx, is_running, is_today))
         scored.sort()
         return [
             {**self._identity(trip_idx, self.trips[trip_idx]), "running": is_running, "today": is_today}
@@ -198,10 +221,12 @@ class TrainSchedule:
                 }
             if i + 1 < len(stops):
                 next_arr_sec = stops[i + 1][2]
-                if dep_sec <= now_sec <= next_arr_sec:
+                if dep_sec <= now_sec < next_arr_sec:  # the arrival second belongs to the station
                     span = next_arr_sec - dep_sec
                     fraction = 0.0 if span <= 0 else (now_sec - dep_sec) / span
-                    lon, lat, bearing = self._interpolate(trip_idx, trip, stops, i, fraction)
+                    # `fraction` itself stays linear in time (it's part of the public shape, used
+                    # for ETA-style reasoning); only the position drawn on the map eases in/out.
+                    lon, lat, bearing = self._interpolate(trip_idx, trip, stops, i, _ease_in_out(fraction))
                     return {"lon": lon, "lat": lat, "bearing": bearing, "stop_i": i, "at_station": False, "fraction": fraction}
         return None
 
@@ -221,28 +246,74 @@ class TrainSchedule:
 
     def _interpolate_along_shape(self, trip_idx, shape_idx, stops, stop_i, fraction):
         shape = self.shapes[shape_idx]
-        indices = self._shape_index_cache.get(trip_idx)
-        if indices is None:
-            indices = [self._nearest_shape_index(shape, self.stations[s[0]]) for s in stops]
-            self._shape_index_cache[trip_idx] = indices
-
-        i0, i1 = indices[stop_i], indices[stop_i + 1]
-        points = shape[i0 : i1 + 1] if i0 <= i1 else list(reversed(shape[i1 : i0 + 1]))
+        if len(shape) < 2:
+            return None
+        anchors = self._shape_anchor_cache.get(trip_idx)
+        if anchors is None:
+            anchors = self._anchor_stops(shape, [self.stations[s[0]] for s in stops])
+            self._shape_anchor_cache[trip_idx] = anchors
+        points = self._sub_polyline(shape, anchors[stop_i], anchors[stop_i + 1])
         if len(points) < 2:
             return None
         return self._point_along(points, fraction)
 
     @staticmethod
-    def _nearest_shape_index(shape, station):
-        # Plain squared distance in degree-space is precise enough at this scale
-        # to snap a station to the closest point already sampled from the same track.
-        lon, lat = station["lon"], station["lat"]
-        best_i, best_d = 0, None
-        for i, (x, y) in enumerate(shape):
-            d = (x - lon) ** 2 + (y - lat) ** 2
-            if best_d is None or d < best_d:
-                best_d, best_i = d, i
-        return best_i
+    def _sub_polyline(shape, start, end):
+        """Track between two anchors in travel order: start point, the vertices between, end point."""
+        forward = start[2] <= end[2]
+        a, b = (start, end) if forward else (end, start)
+        a_seg, a_t, _ = a
+        b_seg, b_t, _ = b
+        points = [_lerp(shape[a_seg], shape[a_seg + 1], a_t)]
+        points.extend(shape[a_seg + 1 : b_seg + 1])
+        points.append(_lerp(shape[b_seg], shape[b_seg + 1], b_t))
+        if not forward:
+            points.reverse()
+        return points
+
+    @staticmethod
+    def _anchor_stops(shape, stations):
+        """Projects each stop onto the closest point ON the shape, not the closest vertex.
+
+        Shapes are Douglas-Peucker simplified, so on straight track the nearest vertex can be
+        kilometres from a station; snapping to vertices made trains teleport and run backwards.
+        Returns per stop (segment index, t within the segment, along-track distance). When a
+        shape passes a station twice (out-and-back), the pass that keeps the stop sequence
+        monotonic along the track wins.
+        """
+        kx = math.cos(math.radians(shape[0][1]))  # shrink longitudes so distances are isotropic
+        pts = [(x * kx, y) for x, y in shape]
+        seg_len, cum = [], [0.0]
+        for i in range(len(pts) - 1):
+            seg_len.append(_dist(*pts[i], *pts[i + 1]))
+            cum.append(cum[-1] + seg_len[-1])
+        last_seg = len(pts) - 2
+
+        def project(station, first_seg, end_seg):
+            px, py = station["lon"] * kx, station["lat"]
+            best = None
+            for i in range(first_seg, end_seg + 1):
+                ax, ay = pts[i]
+                bx, by = pts[i + 1]
+                length = seg_len[i]
+                t = 0.0 if length == 0 else ((px - ax) * (bx - ax) + (py - ay) * (by - ay)) / (length * length)
+                t = min(1.0, max(0.0, t))
+                d = _dist(px, py, ax + (bx - ax) * t, ay + (by - ay) * t)
+                if best is None or d < best[0]:
+                    best = (d, i, t, cum[i] + t * length)
+            return best[1:]
+
+        anchors = [project(station, 0, last_seg) for station in stations]
+        if len(anchors) < 2:
+            return anchors
+        forward = anchors[-1][2] >= anchors[0][2]
+        for i in range(1, len(anchors)):
+            prev_seg, _, prev_along = anchors[i - 1]
+            if forward and anchors[i][2] < prev_along:
+                anchors[i] = project(stations[i], prev_seg, last_seg)
+            elif not forward and anchors[i][2] > prev_along:
+                anchors[i] = project(stations[i], 0, prev_seg)
+        return anchors
 
     @staticmethod
     def _point_along(points, fraction):

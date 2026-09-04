@@ -2,8 +2,8 @@
 # lokalizacje torów i stacji. Regulaminy źródeł (mkuran.pl, OSM/Overpass)
 # pozwalają na użycie danych, ale nie na ich redystrybucję w tym repo —
 # każdy klonujący ma sam odpalić build_data.py.
-mapa_polski/data/*.json
-mapa_polski/data/*.geojson
+train_visualization/data/*.json
+train_visualization/data/*.geojson
 
 __pycache__/
 *.pyc

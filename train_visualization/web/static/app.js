@@ -97,13 +97,23 @@ window.App = (function () {
       .then(function () { polling = false; });
   }
 
+  function fitToFocus(bbox) {
+    // Leaflet computes the zoom from the container size, so a fit issued before the
+    // browser has laid the pane out lands on zoom 0 (the whole world). Re-measure first,
+    // and if the container is still unsized, wait for it rather than fitting to nothing.
+    map.invalidateSize(false);
+    var size = map.getSize();
+    if (size.x < 50 || size.y < 50) {
+      requestAnimationFrame(function () { fitToFocus(bbox); });
+      return;
+    }
+    map.fitBounds([[bbox[1], bbox[0]], [bbox[3], bbox[2]]]);
+  }
+
   function start() {
     api('/api/meta').then(function (meta) {
       state.meta = meta;
-      if (meta.focus_bbox) {
-        var b = meta.focus_bbox;
-        map.fitBounds([[b[1], b[0]], [b[3], b[2]]]);
-      }
+      if (meta.focus_bbox) fitToFocus(meta.focus_bbox);
       emit('meta', meta);
       poll();
       setInterval(poll, POLL_MS);
@@ -113,6 +123,7 @@ window.App = (function () {
     });
   }
 
+  window.addEventListener('resize', function () { map.invalidateSize(false); });
   document.addEventListener('DOMContentLoaded', start);
 
   return {

@@ -24,7 +24,7 @@ API (JSON, localhost only, no auth). `t=HH:MM` (or HH:MM:SS) on any endpoint mea
 Static files:
   /                      -> web/index.html
   /static/...            -> web/static/...
-  /data/tory.geojson, /data/stacje.json -> mapa_polski/data/  (rail lines, stations)
+  /data/tory.geojson, /data/stacje.json -> train_visualization/data/  (rail lines, stations)
 """
 import json
 import mimetypes
@@ -36,7 +36,7 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from mapa_polski.trains import TrainSchedule
+from train_visualization.trains import TrainSchedule
 
 WEB_DIR = Path(__file__).parent / "web"
 DATA_DIR = Path(__file__).parent / "data"
