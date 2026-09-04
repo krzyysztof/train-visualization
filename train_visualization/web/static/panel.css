@@ -64,6 +64,13 @@
 
 .pn-next.pn-idle { color: var(--muted); }
 
+.pn-speed {
+  margin: 0 0 10px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.pn-speed:empty { display: none; }
+
 .pn-stops {
   position: relative;
   max-height: 45vh;

@@ -8,7 +8,19 @@ train_visualization/data/*.geojson
 __pycache__/
 *.pyc
 .DS_Store
+.venv/
+
+# Dane wygenerowane przez skrypty w ml/ (kod, który je produkuje, zostaje śledzony).
+ml/dataset.csv
+ml/delay_pairs.csv
 
 # cache pobranych surowych danych (Overpass), jeśli scripts/build_data.py go zostawi
 *_cache/
 overpass_railway_pl.json
+
+# Ręcznie zbierane dane o opóźnieniach (mkuran.pl, CC BY 4.0) — surowe, rosnący
+# zbiór, nie kod. collect_delays.py i PROVENANCE.md ZOSTAJĄ śledzone — to tylko
+# wynik ich działania.
+ml/opoznienia/delays.jsonl
+ml/opoznienia/.collector_state.json
+ml/opoznienia/mkuran_gtfs_page_snapshot.html

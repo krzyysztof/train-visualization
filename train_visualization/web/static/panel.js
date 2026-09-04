@@ -110,6 +110,9 @@
     var next = el('p', 'pn-next');
     details.appendChild(next);
 
+    var speedLine = el('p', 'pn-speed');
+    details.appendChild(speedLine);
+
     var list = el('ol', 'pn-stops');
     var rows = data.stops.map(function (stop, i) {
       var row = el('li', 'pn-stop');
@@ -121,7 +124,7 @@
     });
     details.appendChild(list);
 
-    view = { trip: data, list: list, rows: rows, next: next, hi: null, autoTop: 0, userScrolled: false };
+    view = { trip: data, list: list, rows: rows, next: next, speedLine: speedLine, hi: null, autoTop: 0, userScrolled: false };
     list.addEventListener('scroll', function () {
       // Anything other than our own programmatic scroll means the user took over.
       if (Math.abs(list.scrollTop - view.autoTop) > 1) view.userScrolled = true;
@@ -173,6 +176,14 @@
     });
     setContent(view.next, text);
     view.next.classList.toggle('pn-idle', idle);
+
+    if (current && !current.at_station) {
+      setContent(view.speedLine, '≈ ' + Math.round(current.speed_kmh) + ' km/h (szacowana)');
+    } else if (current && current.at_station) {
+      setContent(view.speedLine, 'zatrzymany');
+    } else {
+      setContent(view.speedLine, '');
+    }
 
     if (hi !== view.hi) {
       var firstTime = view.hi === null;

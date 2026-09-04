@@ -1,14 +1,7 @@
 /*
- * Module: static map layers — rail lines (/data/tory.geojson) and stations (/data/stacje.json).
- * Contract: see app.js.
- *
- * Rail lines: one L.geoJSON on its own canvas renderer, non-interactive so it never steals
- * clicks from trains, always visible, a little thinner below zoom 8.
- * Stations: fetched once and collapsed to one point per station (the feed lists every platform).
- * From zoom 11 the stations inside the padded viewport are drawn as small canvas circles with a
- * hover tooltip; from zoom 14 the names are shown permanently. The subset is rebuilt (diffed, not
- * recreated) after every App 'move'/'zoom'. Both layers sit in overlayPane, below train markers,
- * and can be toggled from the layers control in the top-right corner.
+ * Static map layers: rail lines (/data/tory.geojson, non-interactive canvas) and stations
+ * (/data/stacje.json, deduped per-platform, dots from zoom 11, names from zoom 14, diffed on
+ * App 'move'/'zoom'). Both toggleable via the layers control, top-right. Contract: see app.js.
  */
 (function () {
   var map = App.map;

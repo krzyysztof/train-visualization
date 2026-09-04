@@ -3,6 +3,10 @@
 Positions are derived purely from a baked GTFS schedule (see data/pociagi.json,
 data/stacje.json) and the system clock — no network access, no live GPS. A train
 running late will appear further along its route than it actually is.
+
+Speed is NOT measured either — it's derived from physics + track geometry (see
+"speed profile" below), not from any real telemetry. It's an honest engineering
+estimate, not a fact about the specific train.
 """
 import json
 import math
@@ -13,6 +17,53 @@ STATIONS_PATH = Path(__file__).parent / "data" / "stacje.json"
 TRAINS_PATH = Path(__file__).parent / "data" / "pociagi.json"
 DAY = 86400
 
+# -- Speed-profile constants: turn a segment's fixed scheduled duration into a
+# plausible motion shape (slow near stations/curves, faster on straights) while
+# the total time still lands exactly on schedule. Engineering assumptions, not
+# measured values — Poland doesn't publish per-line speed limits we could use.
+
+LATERAL_ACCEL_MPS2 = 0.6  # comfort limit assumed for curve speed cap (unbanked-equivalent simplification)
+LINEAR_ACCEL_MPS2 = 0.5  # acceleration/deceleration assumed for all trains (simplification)
+MIN_SPEED_MPS = 1.0  # numerical floor only, not a claimed real minimum speed
+
+# Orientacyjne, publicznie znane maksymalne prędkości eksploatacyjne wg kategorii
+# pociągu (nie dane pomiarowe/telemetryczne) — używane jako sufit prędkości "w linii
+# prostej", zanim krzywizna toru i rozpędzanie/hamowanie go obniżą.
+_CRUISE_KMH_EXACT = {
+    "EIP": 200,
+    "EIC": 160,
+    "ICN": 160,
+    "IC": 140,
+    "TLK": 140,
+    "MP": 120,
+    "KD Sprinter": 120,
+}
+# Sprawdzane w tej kolejności (pierwsze trafienie wygrywa) dla kategorii spoza
+# powyższej listy — dopasowanie po prefiksie kodu linii.
+_CRUISE_KMH_PREFIXES = [
+    ("SKA", 110),  # Koleje Małopolskie
+    ("PKM", 110),  # Koleje Wielkopolskie
+    ("RL", 100),  # KM, linie lokalne
+    ("REG", 110),  # PolRegio
+    ("S", 100),  # SKM/miejskie (S1..S9, S18, S40...)
+    ("Ł", 100),  # Łódzka Kolej Aglomeracyjna
+    ("D", 110),  # Koleje Dolnośląskie (D3, D62...)
+    ("R", 110),  # KM regionalne (R1..R91, RE1/RE2...)
+    ("K", 110),  # PolRegio (K5, K7), Koleje Śląskie (KŚ)
+]
+_CRUISE_KMH_DEFAULT = 120
+
+
+def _cruise_speed_mps(route):
+    route = (route or "").strip()
+    kmh = _CRUISE_KMH_EXACT.get(route)
+    if kmh is None:
+        for prefix, value in _CRUISE_KMH_PREFIXES:
+            if route.startswith(prefix):
+                kmh = value
+                break
+    return (kmh if kmh is not None else _CRUISE_KMH_DEFAULT) / 3.6
+
 
 def _date_to_int(d):
     return d.year * 10000 + d.month * 100 + d.day
@@ -22,18 +73,35 @@ def _dist(ax, ay, bx, by):
     return math.hypot(bx - ax, by - ay)
 
 
+def _meters(lon1, lat1, lon2, lat2):
+    """Real-world distance in metres (flat-earth approximation — fine at track-segment scale)."""
+    kx = math.cos(math.radians((lat1 + lat2) / 2)) * 111320
+    ky = 111320
+    return math.hypot((lon2 - lon1) * kx, (lat2 - lat1) * ky)
+
+
+def _radius_of_curvature_m(prev, cur, nxt, lat_ref):
+    """Menger curvature radius at `cur` (metres) from 3 track points; None if (near-)straight."""
+    kx = math.cos(math.radians(lat_ref)) * 111320
+    ky = 111320
+    ax, ay = prev[0] * kx, prev[1] * ky
+    bx, by = cur[0] * kx, cur[1] * ky
+    cx, cy = nxt[0] * kx, nxt[1] * ky
+    a = math.hypot(bx - cx, by - cy)
+    b = math.hypot(ax - cx, ay - cy)
+    c = math.hypot(ax - bx, ay - by)
+    cross2 = abs((bx - ax) * (cy - ay) - (cx - ax) * (by - ay))  # = 2 * triangle area
+    if cross2 < 1e-6 or a == 0 or b == 0 or c == 0:
+        return None  # collinear (or degenerate) -> effectively straight
+    return (a * b * c) / (2 * cross2)
+
+
 def _lerp(a, b, t):
     return a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t
 
 
 def _ease_in_out(t):
-    """Maps a linear time-fraction (0..1) to a slow-start/slow-end travel-fraction.
-
-    Real trains accelerate out of a station and brake into the next one rather than
-    holding a constant speed; the schedule only gives us total travel time, not a
-    speed profile, so this is a plausible curve, not a measured one. Zero derivative
-    at both ends (t=0 and t=1) gives the "starts and ends at rest" look.
-    """
+    """Fallback-path easing (no shape data): linear time-fraction -> slow-start/slow-end fraction."""
     return 0.5 - 0.5 * math.cos(math.pi * t)
 
 
@@ -68,6 +136,7 @@ class TrainSchedule:
         self._candidates = []  # list of (trip_idx, origin_date_int)
         self._origins_by_trip = {}  # trip_idx -> [origin_date_int, ...]
         self._shape_anchor_cache = {}  # trip_idx -> per stop (segment index, t within it, along-track distance)
+        self._speed_profile_cache = {}  # (trip_idx, stop_i) -> _build_speed_profile() result
 
     # -- candidate trips for a given day ---------------------------------------
 
@@ -216,7 +285,7 @@ class TrainSchedule:
                     nxt = self.stations[stops[i + 1][0]]
                     bearing = _bearing(station["lon"], station["lat"], nxt["lon"], nxt["lat"])
                 return {
-                    "lon": station["lon"], "lat": station["lat"], "bearing": bearing,
+                    "lon": station["lon"], "lat": station["lat"], "bearing": bearing, "speed_kmh": 0.0,
                     "stop_i": i, "at_station": True, "fraction": 0.0,
                 }
             if i + 1 < len(stops):
@@ -224,27 +293,36 @@ class TrainSchedule:
                 if dep_sec <= now_sec < next_arr_sec:  # the arrival second belongs to the station
                     span = next_arr_sec - dep_sec
                     fraction = 0.0 if span <= 0 else (now_sec - dep_sec) / span
-                    # `fraction` itself stays linear in time (it's part of the public shape, used
-                    # for ETA-style reasoning); only the position drawn on the map eases in/out.
-                    lon, lat, bearing = self._interpolate(trip_idx, trip, stops, i, _ease_in_out(fraction))
-                    return {"lon": lon, "lat": lat, "bearing": bearing, "stop_i": i, "at_station": False, "fraction": fraction}
+                    # `fraction` stays linear in time (part of the public shape, used for ETA-style
+                    # reasoning); the position/speed physics profile is independent of it.
+                    lon, lat, bearing, speed_kmh = self._interpolate(trip_idx, trip, stops, i, now_sec)
+                    return {
+                        "lon": lon, "lat": lat, "bearing": bearing, "speed_kmh": speed_kmh,
+                        "stop_i": i, "at_station": False, "fraction": fraction,
+                    }
         return None
 
-    def _interpolate(self, trip_idx, trip, stops, stop_i, fraction):
+    def _interpolate(self, trip_idx, trip, stops, stop_i, now_sec):
         a = self.stations[stops[stop_i][0]]
         b = self.stations[stops[stop_i + 1][0]]
+        dep_sec, arr_sec = stops[stop_i][1], stops[stop_i + 1][2]
         shape_idx = trip.get("shape")
         if shape_idx is not None:
-            point = self._interpolate_along_shape(trip_idx, shape_idx, stops, stop_i, fraction)
+            point = self._interpolate_along_shape(trip_idx, shape_idx, stops, stop_i, now_sec, dep_sec, arr_sec, trip.get("route", ""))
             if point is not None:
                 return point
-        return (
-            a["lon"] + (b["lon"] - a["lon"]) * fraction,
-            a["lat"] + (b["lat"] - a["lat"]) * fraction,
-            _bearing(a["lon"], a["lat"], b["lon"], b["lat"]),
-        )
+        # Fallback for a trip with no track shape (none currently occur in the data, but
+        # a straight line beats crashing): same eased eyeball curve as before, no curvature.
+        span = arr_sec - dep_sec
+        fraction = _ease_in_out(0.0 if span <= 0 else (now_sec - dep_sec) / span)
+        lon = a["lon"] + (b["lon"] - a["lon"]) * fraction
+        lat = a["lat"] + (b["lat"] - a["lat"]) * fraction
+        bearing = _bearing(a["lon"], a["lat"], b["lon"], b["lat"])
+        dist_m = _meters(a["lon"], a["lat"], b["lon"], b["lat"])
+        speed_kmh = (dist_m / span) * 3.6 if span > 0 else 0.0
+        return lon, lat, bearing, speed_kmh
 
-    def _interpolate_along_shape(self, trip_idx, shape_idx, stops, stop_i, fraction):
+    def _interpolate_along_shape(self, trip_idx, shape_idx, stops, stop_i, now_sec, dep_sec, arr_sec, route):
         shape = self.shapes[shape_idx]
         if len(shape) < 2:
             return None
@@ -255,7 +333,82 @@ class TrainSchedule:
         points = self._sub_polyline(shape, anchors[stop_i], anchors[stop_i + 1])
         if len(points) < 2:
             return None
-        return self._point_along(points, fraction)
+        span = arr_sec - dep_sec
+        if span <= 0:
+            return None
+        cache_key = (trip_idx, stop_i)
+        profile = self._speed_profile_cache.get(cache_key)
+        if profile is None:
+            profile = self._build_speed_profile(points, span, route)
+            self._speed_profile_cache[cache_key] = profile
+        return self._locate_on_profile(profile, now_sec - dep_sec)
+
+    @staticmethod
+    def _build_speed_profile(points, span_sec, route):
+        """Speed cap at each point = min(category cruise, curve radius, accel/decel kinematics),
+        then the whole profile is rescaled so total time matches the schedule exactly — only
+        redistributes real scheduled duration, never invents time."""
+        n = len(points)
+        lat_ref = points[0][1]
+        lengths_m = [_meters(*points[i], *points[i + 1]) for i in range(n - 1)]
+
+        cum_m = [0.0] * n
+        for i in range(1, n):
+            cum_m[i] = cum_m[i - 1] + lengths_m[i - 1]
+        total_m = cum_m[-1]  # same running sum as cum_m, so total_m - cum_m[i] can't go negative below
+        if total_m <= 0:
+            return {"points": points, "cum_time": [0.0] * n, "v_kmh": [0.0] * n}
+
+        cruise_mps = _cruise_speed_mps(route)
+
+        v_target = [cruise_mps] * n
+        for i in range(n):
+            if 0 < i < n - 1:
+                radius = _radius_of_curvature_m(points[i - 1], points[i], points[i + 1], lat_ref)
+                if radius is not None:
+                    v_target[i] = min(v_target[i], math.sqrt(LATERAL_ACCEL_MPS2 * radius))
+            v_accel = math.sqrt(2 * LINEAR_ACCEL_MPS2 * max(0.0, cum_m[i]))
+            v_decel = math.sqrt(2 * LINEAR_ACCEL_MPS2 * max(0.0, total_m - cum_m[i]))
+            v_target[i] = max(MIN_SPEED_MPS, min(v_target[i], v_accel, v_decel))
+
+        # Per-segment "effort" (time it would take at the average of its two endpoint speeds),
+        # then rescale every segment's share of that effort onto the real scheduled duration.
+        weight = [
+            lengths_m[i] / max((v_target[i] + v_target[i + 1]) / 2, MIN_SPEED_MPS)
+            for i in range(n - 1)
+        ]
+        total_weight = sum(weight)
+        scale = span_sec / total_weight if total_weight > 0 else 1.0
+
+        cum_time = [0.0] * n
+        for i in range(n - 1):
+            cum_time[i + 1] = cum_time[i] + weight[i] * scale
+        cum_time[-1] = span_sec  # guard against float drift so the segment ends exactly on time
+
+        # v_target/scale is the real (schedule-calibrated) speed AT each vertex — the same
+        # scale factor that turned "weight" into real seconds turns relative target speed into
+        # real km/h. Interpolating this per-vertex value (instead of reporting one flat average
+        # per segment) is what makes the speed shown to the user change every second, not just
+        # when the train crosses to the next point of the (coarse, simplified) track geometry.
+        v_kmh = [v / scale * 3.6 for v in v_target] if scale > 0 else [0.0] * n
+
+        return {"points": points, "cum_time": cum_time, "v_kmh": v_kmh}
+
+    @staticmethod
+    def _locate_on_profile(profile, elapsed_sec):
+        points, cum_time, v_kmh = profile["points"], profile["cum_time"], profile["v_kmh"]
+        elapsed_sec = max(0.0, min(elapsed_sec, cum_time[-1]))
+        for i in range(len(cum_time) - 1):
+            if cum_time[i] <= elapsed_sec <= cum_time[i + 1]:
+                seg_span = cum_time[i + 1] - cum_time[i]
+                t = 0.0 if seg_span <= 0 else (elapsed_sec - cum_time[i]) / seg_span
+                ax, ay = points[i]
+                bx, by = points[i + 1]
+                lon, lat = ax + (bx - ax) * t, ay + (by - ay) * t
+                speed_kmh = v_kmh[i] + (v_kmh[i + 1] - v_kmh[i]) * t
+                return lon, lat, _bearing(ax, ay, bx, by), speed_kmh
+        ax, ay = points[-1]
+        return ax, ay, None, 0.0
 
     @staticmethod
     def _sub_polyline(shape, start, end):
@@ -273,14 +426,9 @@ class TrainSchedule:
 
     @staticmethod
     def _anchor_stops(shape, stations):
-        """Projects each stop onto the closest point ON the shape, not the closest vertex.
-
-        Shapes are Douglas-Peucker simplified, so on straight track the nearest vertex can be
-        kilometres from a station; snapping to vertices made trains teleport and run backwards.
-        Returns per stop (segment index, t within the segment, along-track distance). When a
-        shape passes a station twice (out-and-back), the pass that keeps the stop sequence
-        monotonic along the track wins.
-        """
+        """Projects each stop onto the closest point ON the shape (not nearest vertex — DP
+        simplification can put that km away, causing teleports). Returns (segment index, t,
+        along-track distance) per stop; picks the pass that keeps stops monotonic along the track."""
         kx = math.cos(math.radians(shape[0][1]))  # shrink longitudes so distances are isotropic
         pts = [(x * kx, y) for x, y in shape]
         seg_len, cum = [], [0.0]
@@ -314,23 +462,3 @@ class TrainSchedule:
             elif not forward and anchors[i][2] > prev_along:
                 anchors[i] = project(stations[i], 0, prev_seg)
         return anchors
-
-    @staticmethod
-    def _point_along(points, fraction):
-        """Point at `fraction` of the polyline's length, plus the bearing of the segment it lies on."""
-        lengths = [_dist(*points[i], *points[i + 1]) for i in range(len(points) - 1)]
-        total = sum(lengths)
-        if total == 0:
-            return points[0][0], points[0][1], None
-        target = fraction * total
-        cum = 0.0
-        for i, seg_len in enumerate(lengths):
-            if cum + seg_len >= target:
-                t = 0.0 if seg_len == 0 else (target - cum) / seg_len
-                ax, ay = points[i]
-                bx, by = points[i + 1]
-                return ax + (bx - ax) * t, ay + (by - ay) * t, _bearing(ax, ay, bx, by)
-            cum += seg_len
-        ax, ay = points[-2]
-        bx, by = points[-1]
-        return bx, by, _bearing(ax, ay, bx, by)

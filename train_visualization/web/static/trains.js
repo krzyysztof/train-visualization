@@ -1,16 +1,7 @@
 /*
- * Module: train markers — one marker per train from App 'positions', coloured by operator
- * (App.state.meta.operators), rotated by bearing, labelled, clickable (App.select), filtered
- * by App.state.hiddenOps, highlighted when selected.
- *
- * Markers are diffed by trip_idx on every poll (add / move / remove) and glide from the previous
- * to the new position over TWEEN_MS with a single requestAnimationFrame loop; the tween is
- * dropped while the map zooms so it never fights Leaflet's zoom animation. Only the position
- * transform, the arrow rotation and a few classes are touched per poll — the icon DOM is built once.
- *
- * Public (for other modules / diagnostics): window.TrainMarkers
- *   getMarker(tripIdx) -> L.Marker | undefined      count() -> number of markers on the map
- *   lastUpdateMs       -> duration of the latest 'positions' diff in milliseconds
+ * Train markers: one per train from App 'positions', coloured by operator, rotated by bearing,
+ * clickable (App.select), diffed by trip_idx per poll and glided to the new position over
+ * TWEEN_MS (dropped during map zoom). Public: window.TrainMarkers.getMarker/count/lastUpdateMs.
  */
 window.TrainMarkers = (function () {
   var LABEL_ZOOM = 11;          // labels for every train from this zoom level up
@@ -70,13 +61,22 @@ window.TrainMarkers = (function () {
     rec.marker.setZIndexOffset(on ? SELECTED_Z : 0);
   }
 
+  // Refreshed every poll — a stale speed would mislead once the train slows/stops.
+  function setSpeedTitle(rec, t) {
+    var rounded = t.at_station ? 0 : Math.round(t.speed_kmh);
+    if (rounded === rec.speedKmh && t.at_station === rec.atStationForTitle) return;
+    rec.speedKmh = rounded;
+    rec.atStationForTitle = t.at_station;
+    var suffix = t.at_station ? ' (na stacji)' : ' (≈ ' + rounded + ' km/h)';
+    rec.el.title = labelText(t) + ' → ' + t.dest + suffix;
+  }
+
   function create(t) {
     var node = template.cloneNode(true);
     node.style.setProperty('--tr-c', colors[t.op] || FALLBACK_COLOR);
     node.lastChild.textContent = labelText(t);
     var marker = L.marker([t.lat, t.lon], {
       icon: L.divIcon({ className: 'tr-marker', html: node, iconSize: null, iconAnchor: [0, 0] }),
-      title: labelText(t) + ' → ' + t.dest,
       keyboard: false
     }).addTo(map);
     marker.on('click', function () { App.select(t.trip_idx); });
@@ -92,10 +92,13 @@ window.TrainMarkers = (function () {
       tweening: false,
       bearing: undefined,
       atStation: undefined,
+      speedKmh: undefined,
+      atStationForTitle: undefined,
       gen: 0
     };
     setBearing(rec, t.bearing);
     setAtStation(rec, t.at_station);
+    setSpeedTitle(rec, t);
     if (t.trip_idx === selectedIdx) setSelected(rec, true);
     return rec;
   }
@@ -177,6 +180,7 @@ window.TrainMarkers = (function () {
         if (t.lat !== rec.toLat || t.lon !== rec.toLon) moveTo(rec, t.lat, t.lon, start);
         setBearing(rec, t.bearing);
         setAtStation(rec, t.at_station);
+        setSpeedTitle(rec, t);
       } else {
         rec = create(t);
         markers.set(t.trip_idx, rec);

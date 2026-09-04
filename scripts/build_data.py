@@ -1,121 +1,56 @@
 #!/usr/bin/env python3
-"""Regenerate the baked data files that the Mapa Polski app reads from train_visualization/data/.
+"""Regenerates train_visualization/data/ — the app only reads these files, never the network.
+Stdlib only (urllib, zipfile, csv, json, math, argparse).
 
-The app itself never touches the network: it only ``json.load``s the files produced here.
-This script is the single, reproducible source of those files. It needs nothing beyond the
-Python 3 standard library (urllib, zipfile, csv, json, math, argparse).
+Usage:
+    python3 scripts/build_data.py                    # both pipelines
+    python3 scripts/build_data.py --trains           # stacje.json + pociagi.json only
+    python3 scripts/build_data.py --tracks           # tory.geojson only
+    python3 scripts/build_data.py --out DIR --keep-downloads --cache-dir DIR
 
-Usage
------
-    python3 scripts/build_data.py                    # both pipelines (default)
-    python3 scripts/build_data.py --trains           # only stacje.json + pociagi.json
-    python3 scripts/build_data.py --tracks           # only tory.geojson
-    python3 scripts/build_data.py --out DIR          # write somewhere else (default: train_visualization/data)
-    python3 scripts/build_data.py --keep-downloads   # cache raw downloads so re-runs skip the network
-    python3 scripts/build_data.py --cache-dir DIR    # where raw downloads are cached (default: system temp dir)
+Atomic writes (a failed download/validation never clobbers existing data). Exit codes:
+0 ok, 1 validation failure, 2 download failed. ``wojewodztwa.geojson`` is third-party
+(ppatrzyk/polska-geojson, MIT) and not touched here.
 
-Every output is written atomically (temp file + rename), so a failed download or a failed
-validation never clobbers the file the app is currently using. Progress goes to stderr.
-Exit status: 0 = success, 1 = validation failure, 2 = a download failed after retries.
+PIPELINE 1: TRACKS -> tory.geojson
+Source: OpenStreetMap/Overpass (ODbL). Query: every ``railway=rail`` way in Poland
+without a ``service=*`` tag (drops yards/sidings/spurs; ~28k ways, ~49MB response).
+Processing: merge ways into chains through 2-way junctions only, simplify per chain
+(local equirectangular projection, 12m prefilter + Douglas-Peucker 50m), round to
+4 decimals, drop degenerate chains.
+Schema: ``{"type":"FeatureCollection","features":[{"properties":{"railway":"rail"},
+"geometry":{"type":"LineString","coordinates":[[lon,lat],...]}}, ...]}``
+Consumer: ``web/static/layers.js`` (fetches ``/data/tory.geojson``).
 
-``wojewodztwa.geojson`` (voivodeship borders, ppatrzyk/polska-geojson, MIT) is a third-party
-file that is NOT produced by any pipeline and is left untouched.
+PIPELINE 2: TRAINS -> stacje.json + pociagi.json
+Source: mkuran.pl/gtfs/polish_trains.zip (CC BY 4.0, PKP PLK data). route_type=3
+(bus substitutions) excluded. GTFS "HH:MM:SS" (HH may exceed 24) -> int seconds
+since midnight of the service day.
 
-Pipeline 1: TRACKS  ->  tory.geojson
--------------------------------------
-Source: OpenStreetMap via the Overpass API (ODbL, "(c) OpenStreetMap contributors").
-Query (POST to https://overpass-api.de/api/interpreter, mirror overpass.kumi.systems):
-
-    [out:json][timeout:180];
-    area["ISO3166-1"="PL"][admin_level=2]->.pl;
-    ( way["railway"="rail"]["service"!~"."](area.pl); );
-    out geom;
-
-i.e. every ``railway=rail`` way in Poland that has no ``service=*`` tag (sidings, yards,
-spurs and crossovers are dropped). The ~49 MB response holds ~28k ways.
-
-Processing:
-  1. Ways are merged into chains through shared end nodes, but ONLY through nodes that
-     are touched by exactly two ways (so junctions/switches always start a new chain).
-  2. Each chain is simplified in a local equirectangular metre projection (centred on the
-     chain's mean latitude): a 12 m radial-distance prefilter for speed, then an iterative
-     Douglas-Peucker with a 50 m tolerance.
-  3. Coordinates are rounded to 4 decimals (~7-11 m), consecutive duplicates are dropped,
-     chains with fewer than two distinct points are discarded.
-
-Output schema (compact JSON, ``separators=(",", ":")``):
-
-    {"type": "FeatureCollection",
-     "features": [
-        {"type": "Feature",
-         "properties": {"railway": "rail"},
-         "geometry": {"type": "LineString", "coordinates": [[lon, lat], ...]}},
-        ...]}
-
-Consumer: ``train_visualization/web/static/layers.js`` (fetches ``/data/tory.geojson`` and reads
-``features[].geometry.coordinates`` for each rail line).
-
-Pipeline 2: TRAINS  ->  stacje.json + pociagi.json
---------------------------------------------------
-Source: https://mkuran.pl/gtfs/polish_trains.zip (CC BY 4.0, Mikolaj Kuranowski, based on
-PKP PLK data). Parsed with zipfile + csv. Trips whose route has ``route_type=3``
-(rail-replacement buses) are excluded. GTFS times "HH:MM:SS" (HH may exceed 24 for trips
-running past midnight) become integer seconds since midnight of the service day.
-
-stacje.json - a JSON array; the ARRAY INDEX is the station index referenced by trips:
-
-    [{"id": "<stop_id>", "name": "<stop_name>", "lat": 52.12345, "lon": 21.12345}, ...]
-
-  * only stops referenced by at least one kept trip, sorted by stop_id (string order),
-  * lat/lon rounded to 5 decimals.
+stacje.json — array, ARRAY INDEX = station index used by trips:
+    [{"id", "name", "lat", "lon"}, ...]   (only referenced stops, sorted by stop_id, 5 decimals)
 
 pociagi.json:
+    {"generated_from", "feed_start_date", "feed_end_date",   # int YYYYMMDD
+     "calendars": [{"on":[YYYYMMDD,...], "off":[...]?}, ...],   # indexed by trips[].cal
+     "shapes": [[[lon,lat],...], ...],                          # indexed by trips[].shape, DP 70m
+     "trips": [{"id", "op", "route", "num", "dest",
+                "cal":[cal_idx,...], "shape": idx?, "n": count?,
+                "stops":[[station_idx, dep_sec, arr_sec], ...]},  # NOTE: dep THEN arr
+               ...],
+     "feed_version"}
 
-    {"generated_from": "https://mkuran.pl/gtfs/polish_trains.zip",
-     "feed_start_date": 20260902,           # int YYYYMMDD from feed_info.txt
-     "feed_end_date":   20261002,           # int YYYYMMDD from feed_info.txt
-     "calendars": [                         # indexed by trips[].cal
-        {"on": [20260902, 20260903, ...],   # sorted int YYYYMMDD service days
-         "off": [20260915]},                # optional, only when non-empty; consumer does set(on) - set(off)
-        ...],
-     "shapes": [[[lon, lat], ...], ...],    # indexed by trips[].shape; shapes.txt simplified
-                                            # with Douglas-Peucker at 70 m, 5 decimals
-     "trips": [
-        {"id":    "<representative trip_id>",   # smallest trip_id of the merged group
-         "op":    "<agency_id>",
-         "route": "<route_short_name>",
-         "num":   "<trip_short_name>",          # train number
-         "dest":  "<trip_headsign>",
-         "cal":   [calendar_index, ...],        # sorted, all service calendars of the merged trips
-         "stops": [[station_index, dep_sec, arr_sec], ...],   # NOTE: departure THEN arrival
-         "shape": shape_index,                  # omitted when the trip has no shape
-         "n":     3},                           # optional: how many identical GTFS trips were merged
-        ...],
-     "feed_version": "<feed_info.feed_version>"}
+  - Calendars: feed only has calendar_dates.txt (exception_type=1) -> emitted verbatim
+    as "on"; identical (on,off) sets share one entry. A future calendar.txt would need
+    expanding into explicit dates.
+  - Dedup: GTFS trips identical in (op, route, num, dest, shape, full stop sequence)
+    merge into one record; "cal" lists all their calendars, "n" = group size (omitted if 1).
+  - Trips with <2 stops, unknown stop_id, or non-monotonic times are dropped (warned).
+Consumer: ``trains.py`` (``TrainSchedule``).
 
-  * Calendars: this feed only ships calendar_dates.txt (all exception_type=1), which is
-    emitted verbatim as "on" (dates are NOT clipped to the feed window). If a future feed
-    adds calendar.txt, its weekday pattern is expanded into explicit dates within
-    feed_start_date..feed_end_date, exception_type=1 dates are added to "on" and
-    exception_type=2 dates go to "off". Identical (on, off) sets share one calendar entry.
-    Only calendars referenced by kept trips are emitted, in sorted service_id order.
-  * Shapes: only those referenced by kept trips, in shapes.txt order (sorted shape_id).
-  * Dedup: GTFS trips sharing an identical (op, route, num, dest, shape, full stop
-    sequence incl. times) are merged into ONE record whose "cal" lists every calendar
-    index of the group and whose "n" is the group size (omitted when 1). Records are
-    sorted by "id".
-  * Trips with fewer than two stops, an unknown stop_id or non-monotonic times are
-    dropped with a warning.
-
-Consumer: ``train_visualization/trains.py`` (``TrainSchedule``).
-
-Validation
-----------
-After each pipeline the written files are re-read (JSON round-trip), counts are printed
-and structural invariants are checked: every stops[][0] < len(stations), every cal/shape
-index in range, times monotonic (arr <= dep, next arr >= previous dep), coordinates within
-a Poland-sized bounding box. The trains pipeline additionally loads the files through the
-app's own ``TrainSchedule``. Any violation makes the script exit with status 1.
+VALIDATION: JSON round-trip + structural checks (indices in range, times monotonic,
+coords within Poland's bbox) after each pipeline; trains pipeline also loads via the
+app's own ``TrainSchedule``. Any violation -> exit 1.
 """
 import argparse
 import collections

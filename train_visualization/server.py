@@ -12,12 +12,13 @@ API (JSON, localhost only, no auth). `t=HH:MM` (or HH:MM:SS) on any endpoint mea
   GET /api/positions?t=HH:MM
       {time: "HH:MM:SS", simulated: bool,
        trains: [{trip_idx, num, route, dest, origin, op, lon, lat,
-                 bearing (deg, 0=N, or null), at_station, stop_i, fraction}]}
+                 bearing (deg, 0=N, or null), speed_kmh, at_station, stop_i, fraction}]}
+      speed_kmh: physics estimate (cruise cap, curve radius, accel/decel), not telemetry.
   GET /api/trip/<trip_idx>?t=HH:MM
       {trip_idx, num, route, dest, origin, op,
        stops: [{name, lat, lon, arr, dep}],          # seconds since midnight of the service day
        shape: [[lon, lat], ...] | null,
-       current: {lon, lat, bearing, stop_i, at_station, fraction, next_stop_i, eta_sec, now_sec} | null}
+       current: {lon, lat, bearing, speed_kmh, stop_i, at_station, fraction, next_stop_i, eta_sec, now_sec} | null}
   GET /api/search?q=<text>&t=HH:MM
       {results: [{trip_idx, num, route, dest, origin, op, running, today}]}
 
