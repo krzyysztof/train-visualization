@@ -4,6 +4,14 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Mapa Polski – pociągi</title>
+  <script>
+    // Set the theme before first paint (no flash of the wrong one on reload).
+    (function () {
+      var saved = localStorage.getItem('theme');
+      var dark = saved ? saved === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches;
+      if (dark) document.documentElement.dataset.theme = 'dark';
+    })();
+  </script>
   <link rel="stylesheet" href="/static/leaflet/leaflet.css">
   <link rel="stylesheet" href="/static/app.css">
   <link rel="stylesheet" href="/static/layers.css">
@@ -14,23 +22,30 @@
 <body>
   <aside id="panel">
     <header id="panel-header">
-      <h1>Mapa Polski</h1>
-      <p class="muted">Pociągi pasażerskie wg rozkładu jazdy</p>
+      <div>
+        <h1>Mapa Polski</h1>
+        <p class="muted">Pociągi pasażerskie wg rozkładu jazdy</p>
+      </div>
+      <button id="theme-toggle" type="button" title="Przełącz jasny/ciemny motyw" aria-label="Przełącz motyw"></button>
     </header>
     <section id="search" aria-label="Wyszukiwarka pociągów"></section>
     <section id="time" aria-label="Suwak czasu"></section>
     <section id="filters" aria-label="Filtr przewoźników"></section>
-    <section id="details" aria-label="Szczegóły pociągu">
-      <p class="muted">Kliknij pociąg na mapie, aby zobaczyć szczegóły.</p>
-    </section>
   </aside>
   <main id="map-wrap">
     <div id="map"></div>
     <div id="status" class="muted"></div>
   </main>
+  <aside id="details-panel">
+    <section id="details" aria-label="Szczegóły pociągu">
+      <p class="muted">Kliknij pociąg na mapie, aby zobaczyć szczegóły.</p>
+    </section>
+  </aside>
 
   <script src="/static/leaflet/leaflet.js"></script>
   <script src="/static/app.js"></script>
+  <script src="/static/theme.js"></script>
+  <script src="/static/follow.js"></script>
   <script src="/static/layers.js"></script>
   <script src="/static/trains.js"></script>
   <script src="/static/panel.js"></script>

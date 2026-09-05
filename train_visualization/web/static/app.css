@@ -1,10 +1,25 @@
 :root {
   --panel-width: 320px;
+  --details-width: 340px;
   --bg: #fafafa;
   --fg: #1f2430;
   --muted: #6b7280;
   --border: #e2e5ea;
   --accent: #1f6fb4;
+  --surface: #ffffff;         /* solid card/control background */
+  --surface-alpha: rgba(255, 255, 255, 0.92); /* translucent overlay on the map */
+  --halo: #ffffff;            /* text-shadow halo colour for labels drawn over the map */
+}
+
+[data-theme="dark"] {
+  --bg: #14171c;
+  --fg: #e5e8ee;
+  --muted: #8b93a3;
+  --border: #2b303a;
+  --accent: #5b9fe0;
+  --surface: #1c212b;
+  --surface-alpha: rgba(28, 33, 43, 0.92);
+  --halo: #05070a;
 }
 
 * { box-sizing: border-box; }
@@ -30,8 +45,20 @@ body {
   padding: 16px;
   overflow-y: auto;
   border-right: 1px solid var(--border);
-  background: #fff;
+  background: var(--surface);
 }
+
+#details-panel {
+  width: var(--details-width);
+  flex: none;
+  overflow-y: auto;
+  border-left: 1px solid var(--border);
+  background: var(--surface);
+}
+
+#details-panel #details { padding: 16px; }
+
+#panel-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
 
 #panel-header h1 {
   margin: 0;
@@ -41,6 +68,19 @@ body {
 #panel-header p {
   margin: 2px 0 0;
 }
+
+#theme-toggle {
+  flex: none;
+  width: 30px;
+  height: 30px;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  background: var(--surface);
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+}
+#theme-toggle:hover { background: var(--bg); }
 
 #panel section:empty { display: none; }
 
@@ -62,9 +102,32 @@ body {
   z-index: 500;
   padding: 4px 8px;
   border-radius: 4px;
-  background: rgba(255, 255, 255, 0.9);
+  background: var(--surface-alpha);
+  color: var(--fg);
   font-size: 12px;
   pointer-events: none;
 }
 
 .muted { color: var(--muted); }
+
+/* ---- dark map: invert the OSM raster tiles only (markers/panes above stay untouched) ---- */
+[data-theme="dark"] .leaflet-tile-pane {
+  filter: invert(1) hue-rotate(180deg) brightness(0.95) contrast(0.9) saturate(0.75);
+}
+
+/* Leaflet's own chrome (zoom buttons, layers control, attribution, tooltips) */
+[data-theme="dark"] .leaflet-bar a,
+[data-theme="dark"] .leaflet-control-layers,
+[data-theme="dark"] .leaflet-popup-content-wrapper,
+[data-theme="dark"] .leaflet-popup-tip,
+[data-theme="dark"] .leaflet-tooltip {
+  background: var(--surface);
+  color: var(--fg);
+  border-color: var(--border);
+}
+[data-theme="dark"] .leaflet-bar a { border-bottom-color: var(--border); }
+[data-theme="dark"] .leaflet-control-attribution {
+  background: var(--surface-alpha);
+  color: var(--muted);
+}
+[data-theme="dark"] .leaflet-control-attribution a { color: var(--accent); }

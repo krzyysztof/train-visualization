@@ -8,6 +8,13 @@
   gap: 10px;
 }
 
+.pn-actions {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
 .pn-chip {
   flex: none;
   width: 12px;
@@ -37,19 +44,27 @@
   overflow-wrap: anywhere;
 }
 
-.pn-close {
+.pn-close,
+.pn-follow {
   flex: none;
   padding: 3px 8px;
   border: 1px solid var(--border);
   border-radius: 4px;
-  background: #fff;
+  background: var(--surface);
   color: var(--fg);
   font: inherit;
   font-size: 12px;
   cursor: pointer;
 }
 
-.pn-close:hover {
+.pn-follow--on {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 16%, var(--surface));
+  color: var(--accent);
+}
+
+.pn-close:hover,
+.pn-follow:hover {
   background: var(--bg);
   border-color: var(--muted);
 }
@@ -64,12 +79,122 @@
 
 .pn-next.pn-idle { color: var(--muted); }
 
-.pn-speed {
-  margin: 0 0 10px;
-  font-size: 12px;
+.pn-speed { margin: 4px 0 12px; text-align: center; }
+.pn-speed:empty { display: none; }
+
+/* Registered so the browser can tween the conic-gradient's angle, not just snap to it. */
+@property --pct {
+  syntax: '<number>';
+  inherits: true;
+  initial-value: 0;
+}
+
+.pn-gauge { display: flex; justify-content: center; }
+
+.pn-gauge-ring {
+  --pct: 0;
+  width: 108px;
+  height: 108px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: conic-gradient(
+    var(--pn-color) calc(var(--pct) * 3.6deg),
+    color-mix(in srgb, var(--muted) 22%, var(--surface)) 0
+  );
+  transition: --pct 0.6s ease;
+}
+
+.pn-gauge-center {
+  width: 82px;
+  height: 82px;
+  border-radius: 50%;
+  background: var(--surface);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+
+.pn-gauge-num {
+  font-size: 22px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.1;
+}
+
+.pn-gauge-unit { font-size: 11px; color: var(--muted); }
+
+.pn-speed-caption {
+  margin: 6px 0 0;
+  font-size: 11px;
   color: var(--muted);
 }
-.pn-speed:empty { display: none; }
+
+.pn-speed-stopped { font-size: 13px; }
+
+.pn-chart { margin: 0 0 14px; }
+
+.pn-chart-title {
+  margin-bottom: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.pn-spark-holder { line-height: 0; }
+.pn-spark-svg { display: block; width: 100%; height: 44px; }
+.pn-spark-area { fill: var(--pn-color); opacity: 0.16; stroke: none; }
+.pn-spark-line {
+  fill: none;
+  stroke: var(--pn-color);
+  stroke-width: 2;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+
+.pn-progress-track {
+  position: relative;
+  height: 6px;
+  margin: 10px 2px 4px;
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--muted) 22%, var(--surface));
+}
+
+.pn-progress-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 0;
+  border-radius: 3px;
+  background: var(--pn-color);
+  transition: width 0.6s ease;
+}
+
+.pn-progress-tick {
+  position: absolute;
+  top: 50%;
+  width: 4px;
+  height: 4px;
+  margin: -2px 0 0 -2px;
+  border-radius: 50%;
+  background: var(--surface);
+  box-shadow: 0 0 0 1px var(--pn-color);
+}
+
+.pn-progress-now {
+  position: absolute;
+  top: 50%;
+  width: 10px;
+  height: 10px;
+  margin: -5px 0 0 -5px;
+  border-radius: 50%;
+  background: var(--pn-color);
+  box-shadow: 0 0 0 2px var(--surface);
+  transition: left 0.6s ease;
+}
 
 .pn-stops {
   position: relative;
@@ -115,7 +240,7 @@
   align-self: center;
   border: 2px solid var(--pn-color);
   border-radius: 50%;
-  background: #fff;
+  background: var(--surface);
 }
 
 .pn-name { overflow-wrap: anywhere; }
@@ -141,12 +266,12 @@
 .pn-current {
   font-weight: 700;
   background: var(--bg);
-  background: color-mix(in srgb, var(--pn-color) 14%, #fff);
+  background: color-mix(in srgb, var(--pn-color) 14%, var(--surface));
 }
 
 .pn-current .pn-dot {
   width: 12px;
   height: 12px;
   background: var(--pn-color);
-  box-shadow: 0 0 0 2px #fff, 0 0 0 4px var(--pn-color);
+  box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--pn-color);
 }

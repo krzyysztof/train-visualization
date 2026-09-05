@@ -2,7 +2,13 @@
 
 :root {
   --ct-sim: #d97706;
-  --ct-hover: #f1f5fb;
+  --ct-hover: color-mix(in srgb, var(--accent) 8%, var(--surface));
+  --ct-ok: #1e7a3c;
+  --ct-ok-bg: #e2f4e8;
+}
+[data-theme="dark"] {
+  --ct-ok: #6fe0a0;
+  --ct-ok-bg: color-mix(in srgb, #2ecc71 25%, var(--surface));
 }
 
 .ct-section-title {
@@ -26,7 +32,7 @@
   white-space: nowrap;
 }
 .ct-btn:hover { filter: brightness(1.08); }
-.ct-btn--ghost { background: #fff; color: var(--accent); }
+.ct-btn--ghost { background: var(--surface); color: var(--accent); }
 .ct-btn:disabled { opacity: 0.45; cursor: default; filter: none; }
 
 .ct-link {
@@ -58,12 +64,12 @@
   border-radius: 4px;
   font: inherit;
   color: var(--fg);
-  background: #fff;
+  background: var(--surface);
 }
 .ct-search-input:focus {
   outline: none;
   border-color: var(--accent);
-  box-shadow: 0 0 0 2px rgba(31, 111, 180, 0.15);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 15%, transparent);
 }
 
 .ct-results {
@@ -88,7 +94,10 @@
 .ct-result:hover,
 .ct-result:focus { background: var(--ct-hover); outline: none; }
 .ct-result--selected,
-.ct-result--selected:hover { background: #e3eefa; box-shadow: inset 3px 0 0 var(--accent); }
+.ct-result--selected:hover {
+  background: color-mix(in srgb, var(--accent) 14%, var(--surface));
+  box-shadow: inset 3px 0 0 var(--accent);
+}
 .ct-result--off { color: var(--muted); }
 .ct-result-label {
   flex: 1;
@@ -104,11 +113,11 @@
   border-radius: 10px;
   font-size: 11px;
   line-height: 1.4;
-  background: #eef0f3;
+  background: color-mix(in srgb, var(--muted) 16%, var(--surface));
   color: var(--muted);
 }
-.ct-tag--run { background: #e2f4e8; color: #1e7a3c; }
-.ct-tag--today { background: #e6f0fa; color: var(--accent); }
+.ct-tag--run { background: var(--ct-ok-bg); color: var(--ct-ok); }
+.ct-tag--today { background: color-mix(in srgb, var(--accent) 14%, var(--surface)); color: var(--accent); }
 .ct-empty { padding: 8px; }
 
 /* ---------- time slider ---------- */
@@ -176,53 +185,3 @@
 .ct-filter-count { flex: none; font-size: 12px; }
 .ct-filter--hidden .ct-filter-name { color: var(--muted); }
 .ct-filter--hidden .ct-chip { opacity: 0.35; }
-
-/* ---------- legend (Leaflet control, bottom-right) ---------- */
-.ct-legend {
-  min-width: 150px;
-  max-width: 220px;
-  padding: 8px 10px;
-  border-radius: 4px;
-  background: rgba(255, 255, 255, 0.92);
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.2);
-  font-size: 12px;
-  line-height: 1.4;
-}
-.ct-legend-title {
-  margin-bottom: 4px;
-  font-weight: 600;
-  color: var(--muted);
-}
-.ct-legend-item {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  width: 100%;
-  padding: 2px 0;
-  border: 0;
-  background: none;
-  font: inherit;
-  color: var(--fg);
-  text-align: left;
-  cursor: pointer;
-}
-.ct-legend-item:hover .ct-legend-name { text-decoration: underline; }
-.ct-legend-item--hidden { opacity: 0.45; }
-.ct-legend-item--hidden .ct-legend-name { text-decoration: line-through; }
-.ct-legend-item--hidden:hover .ct-legend-name { text-decoration: line-through underline; }
-.ct-legend-arrow {
-  flex: none;
-  width: 12px;
-  height: 12px;
-  background: var(--muted);
-  clip-path: polygon(50% 0, 100% 100%, 50% 72%, 0 100%);
-}
-.ct-legend-name {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.ct-legend-more {
-  display: inline-block;
-  margin-top: 4px;
-}

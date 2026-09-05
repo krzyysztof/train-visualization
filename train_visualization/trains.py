@@ -23,7 +23,10 @@ DAY = 86400
 # measured values — Poland doesn't publish per-line speed limits we could use.
 
 LATERAL_ACCEL_MPS2 = 0.6  # comfort limit assumed for curve speed cap (unbanked-equivalent simplification)
-LINEAR_ACCEL_MPS2 = 0.5  # acceleration/deceleration assumed for all trains (simplification)
+DECEL_MPS2 = 0.5  # braking: modelled as roughly constant across speed (friction/dynamic brakes)
+ACCEL_LOW_MPS2 = 0.6  # speeding up, below ACCEL_TAPER_KMH: traction-limited, roughly constant
+ACCEL_TAPER_KMH = 50.0  # above this, tractive effort ~ constant power, so accel falls off as 1/v —
+# real trains take much longer to reach a high cruise speed than a flat-rate model implies
 MIN_SPEED_MPS = 1.0  # numerical floor only, not a claimed real minimum speed
 
 # Orientacyjne, publicznie znane maksymalne prędkości eksploatacyjne wg kategorii
@@ -360,9 +363,18 @@ class TrainSchedule:
 
     @staticmethod
     def _build_speed_profile(points, span_sec, route):
-        """Speed cap at each point = min(category cruise, real OSM limit if known, curve radius,
-        accel/decel kinematics), then the whole profile is rescaled so total time matches the
-        schedule exactly — only redistributes real scheduled duration, never invents time."""
+        """Speed cap at each point = min(category cruise, real OSM limit if known, curve radius).
+        A forward sweep from rest (tapering accel above ACCEL_TAPER_KMH, like a traction motor
+        running out of power) and a backward sweep to rest (constant-rate braking) each respect
+        those caps and each other's neighbouring point, so the profile never demands a harder
+        accel/brake between two points than a real train could do — then the whole thing is
+        rescaled so total time matches the schedule exactly, never invents time.
+
+        Rescaling and the accel/decel limits interact (dividing speed by `scale` also divides
+        the *feasible* acceleration by scale^2), so both are solved together by iterating a few
+        times rather than computed once. On a handful of very tight real schedules this still
+        doesn't fully converge — matching the published arrival time exactly wins in that case,
+        so an unusually short hop may show a slightly harder accel/brake than modelled."""
         n = len(points)
         lat_ref = points[0][1]
         lengths_m = [_meters(points[i][0], points[i][1], points[i + 1][0], points[i + 1][1]) for i in range(n - 1)]
@@ -376,27 +388,54 @@ class TrainSchedule:
 
         cruise_mps = _cruise_speed_mps(route)
 
-        v_target = [cruise_mps] * n
+        v_cap = [cruise_mps] * n
         for i in range(n):
             limit_kmh = points[i][2]
             if limit_kmh is not None:
-                v_target[i] = min(v_target[i], limit_kmh / 3.6)
+                v_cap[i] = min(v_cap[i], limit_kmh / 3.6)
             if 0 < i < n - 1:
                 radius = _radius_of_curvature_m(points[i - 1], points[i], points[i + 1], lat_ref)
                 if radius is not None:
-                    v_target[i] = min(v_target[i], math.sqrt(LATERAL_ACCEL_MPS2 * radius))
-            v_accel = math.sqrt(2 * LINEAR_ACCEL_MPS2 * max(0.0, cum_m[i]))
-            v_decel = math.sqrt(2 * LINEAR_ACCEL_MPS2 * max(0.0, total_m - cum_m[i]))
-            v_target[i] = max(MIN_SPEED_MPS, min(v_target[i], v_accel, v_decel))
+                    v_cap[i] = min(v_cap[i], math.sqrt(LATERAL_ACCEL_MPS2 * radius))
 
-        # Per-segment "effort" (time it would take at the average of its two endpoint speeds),
-        # then rescale every segment's share of that effort onto the real scheduled duration.
-        weight = [
-            lengths_m[i] / max((v_target[i] + v_target[i + 1]) / 2, MIN_SPEED_MPS)
-            for i in range(n - 1)
-        ]
-        total_weight = sum(weight)
-        scale = span_sec / total_weight if total_weight > 0 else 1.0
+        # v_target/scale (computed below) is what ends up on screen, so the accel/decel checks
+        # below must hold for v_target/scale, not for v_target itself — but scale is only known
+        # once v_target exists. Fixed-point iteration: assume a scale, build v_target against
+        # accel/decel/taper-speed all converted to "pre-scale" units (equivalent to checking the
+        # *scaled* speeds against the real limits), re-derive scale from that, repeat.
+        v_target, weight, total_weight, scale = list(v_cap), [], 0.0, 1.0
+        for _ in range(10):
+            accel_lo = ACCEL_LOW_MPS2 * scale * scale
+            decel = DECEL_MPS2 * scale * scale
+            taper_v = (ACCEL_TAPER_KMH / 3.6) * scale
+
+            # Forward sweep: starts at rest, so it alone enforces "departs slowly", and at each
+            # step it's also capped by what's reachable from the *previous* point — so a sudden
+            # restriction there (a real speed-limit drop, a tight curve) can't be skipped over
+            # by "teleporting" back up to speed on the other side of it.
+            v_fwd = list(v_cap)
+            v_fwd[0] = min(v_fwd[0], MIN_SPEED_MPS)
+            for i in range(1, n):
+                a = accel_lo * min(1.0, taper_v / max(v_fwd[i - 1], MIN_SPEED_MPS))
+                v_fwd[i] = min(v_fwd[i], math.sqrt(v_fwd[i - 1] ** 2 + 2 * a * lengths_m[i - 1]))
+
+            # Backward sweep: same idea in reverse, for braking to a stand at the far end.
+            v_bwd = list(v_cap)
+            v_bwd[-1] = min(v_bwd[-1], MIN_SPEED_MPS)
+            for i in range(n - 2, -1, -1):
+                v_bwd[i] = min(v_bwd[i], math.sqrt(v_bwd[i + 1] ** 2 + 2 * decel * lengths_m[i]))
+
+            v_target = [max(MIN_SPEED_MPS, min(v_fwd[i], v_bwd[i])) for i in range(n)]
+
+            # Per-segment "effort" (time it would take at the average of its two endpoint
+            # speeds), then rescale every segment's share of that effort onto the real
+            # scheduled duration.
+            weight = [
+                lengths_m[i] / max((v_target[i] + v_target[i + 1]) / 2, MIN_SPEED_MPS)
+                for i in range(n - 1)
+            ]
+            total_weight = sum(weight)
+            scale = span_sec / total_weight if total_weight > 0 else 1.0
 
         cum_time = [0.0] * n
         for i in range(n - 1):

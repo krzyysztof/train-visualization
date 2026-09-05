@@ -1,7 +1,8 @@
 /*
  * Train markers: one per train from App 'positions', coloured by operator, rotated by bearing,
  * clickable (App.select), diffed by trip_idx per poll and glided to the new position over
- * TWEEN_MS (dropped during map zoom). Public: window.TrainMarkers.getMarker/count/lastUpdateMs.
+ * TWEEN_MS (dropped during map zoom). Also draws a fading trail behind the selected train.
+ * Public: window.TrainMarkers.getMarker/count/lastUpdateMs.
  */
 window.TrainMarkers = (function () {
   var LABEL_ZOOM = 11;          // labels for every train from this zoom level up
@@ -9,6 +10,11 @@ window.TrainMarkers = (function () {
   var SNAP_DEG2 = 0.009 * 0.009; // ~1 km: bigger jumps (time slider, tab was asleep) are not animated
   var SELECTED_Z = 100000;
   var FALLBACK_COLOR = '#7f7f7f';
+  var TRAIL_MAX_POINTS = 45;    // ~45s of history at one poll/second
+  var TRAIL_MAX_OPACITY = 0.85; // most recent segment; fades toward 0 for older ones
+  var TRAIL_COLOR = '#e0a800';  // fixed gold (matches the selected-marker accent), not the
+                                 // operator colour — the route line ahead is already drawn in
+                                 // that colour, so a same-colour trail would be invisible on it
 
   var map = App.map;
   var markers = new Map();      // trip_idx -> rec
@@ -18,6 +24,8 @@ window.TrainMarkers = (function () {
   var generation = 0;
   var selectedIdx = null;
   var colors = {};              // operator code -> colour, from /api/meta
+  var trailLayer = L.layerGroup().addTo(map);
+  var trailHistory = [];        // [[lat, lon], ...] for the selected train only, oldest first
 
   var template = document.createElement('div');
   template.className = 'tr-train';
@@ -59,6 +67,27 @@ window.TrainMarkers = (function () {
   function setSelected(rec, on) {
     rec.node.classList.toggle('tr-selected', on);
     rec.marker.setZIndexOffset(on ? SELECTED_Z : 0);
+  }
+
+  function clearTrail() {
+    trailHistory = [];
+    trailLayer.clearLayers();
+  }
+
+  function redrawTrail() {
+    trailLayer.clearLayers();
+    var n = trailHistory.length;
+    for (var i = 1; i < n; i++) {
+      L.polyline([trailHistory[i - 1], trailHistory[i]], {
+        color: TRAIL_COLOR, weight: 4, opacity: (i / n) * TRAIL_MAX_OPACITY, interactive: false
+      }).addTo(trailLayer);
+    }
+  }
+
+  function pushTrail(t) {
+    trailHistory.push([t.lat, t.lon]);
+    if (trailHistory.length > TRAIL_MAX_POINTS) trailHistory.shift();
+    redrawTrail();
   }
 
   // Refreshed every poll — a stale speed would mislead once the train slows/stops.
@@ -186,6 +215,7 @@ window.TrainMarkers = (function () {
         markers.set(t.trip_idx, rec);
       }
       rec.gen = generation;
+      if (t.trip_idx === selectedIdx) pushTrail(t);
     }
     markers.forEach(function (rec, idx) {
       if (rec.gen !== generation) {
@@ -212,6 +242,7 @@ window.TrainMarkers = (function () {
     if (prev) setSelected(prev, false);
     var next = idx !== null && markers.get(idx);
     if (next) setSelected(next, true);
+    clearTrail();
   });
   App.on('zoom', updateLabelClass);
   map.on('zoomstart', function () { zooming = true; cancelTweens(); });

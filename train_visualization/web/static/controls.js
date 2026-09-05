@@ -1,12 +1,11 @@
 /*
- * Module: controls — search box (#search, /api/search), time slider (#time, App.setSimTime),
- * operator filter checkboxes (#filters, App.setOperatorHidden) and a colour legend on the map.
+ * Module: controls — search box (#search, /api/search), time slider (#time, App.setSimTime)
+ * and operator filter checkboxes (#filters, App.setOperatorHidden).
  *
  * Every change goes through App's setters and every widget reacts to App's events, so the
  * controls stay in sync with changes made elsewhere (marker clicks, panel actions).
  */
 (function () {
-  var LEGEND_TOP = 8;            // operators shown in the legend before "+N innych"
   var SLIDER_DEBOUNCE_MS = 150;  // slider drag -> App.setSimTime
   var MIN_PAN_ZOOM = 11;         // zoom used when panning to a search result
   var opsByCode = {};            // code -> {code, name, color, count} from /api/meta
@@ -313,87 +312,7 @@
     App.on('filter', reflect);
   }
 
-  /* ------------------------------------------------------------------ legend */
-  function othersLabel(n) {
-    var tens = n % 100;
-    var ones = n % 10;
-    if (n === 1) return '+1 inny';
-    if (ones >= 2 && ones <= 4 && (tens < 12 || tens > 14)) return '+' + n + ' inne';
-    return '+' + n + ' innych';
-  }
-
-  function initLegend() {
-    var container = L.DomUtil.create('div', 'ct-legend');
-    L.DomEvent.disableClickPropagation(container);
-    L.DomEvent.disableScrollPropagation(container);
-    var control = L.control({ position: 'bottomright' });
-    control.onAdd = function () { return container; };
-    control.addTo(App.map);
-    container.hidden = true;
-
-    var entries = [];     // [{code, count}] sorted by count desc — operators with trains right now
-    var signature = '';   // ordered codes of the last render
-    var expanded = false;
-
-    function itemTitle(code) {
-      return (App.state.hiddenOps.has(code) ? 'Pokaż ' : 'Ukryj ') + operator(code).name;
-    }
-
-    function render() {
-      container.innerHTML = '';
-      container.hidden = !entries.length;
-      if (!entries.length) return;
-      container.appendChild(el('div', 'ct-legend-title', 'Przewoźnicy w trasie'));
-      var shown = expanded ? entries : entries.slice(0, LEGEND_TOP);
-      shown.forEach(function (entry) {
-        var op = operator(entry.code);
-        var item = el('button', 'ct-legend-item' + (App.state.hiddenOps.has(entry.code) ? ' ct-legend-item--hidden' : ''));
-        item.type = 'button';
-        item.dataset.code = entry.code;
-        item.title = itemTitle(entry.code);
-        var arrow = el('span', 'ct-legend-arrow');
-        if (op.color) arrow.style.background = op.color;
-        item.appendChild(arrow);
-        item.appendChild(el('span', 'ct-legend-name', op.name));
-        item.addEventListener('click', function () {
-          App.setOperatorHidden(entry.code, !App.state.hiddenOps.has(entry.code));
-        });
-        container.appendChild(item);
-      });
-      if (entries.length > LEGEND_TOP) {
-        var more = el('a', 'ct-link ct-legend-more', expanded ? 'mniej' : othersLabel(entries.length - shown.length));
-        more.href = '#';
-        more.addEventListener('click', function (e) {
-          e.preventDefault();
-          expanded = !expanded;
-          render();
-        });
-        container.appendChild(more);
-      }
-    }
-
-    App.on('positions', function (data) {
-      var counts = {};
-      data.trains.forEach(function (t) { counts[t.op] = (counts[t.op] || 0) + 1; });
-      var sorted = Object.keys(counts)
-        .map(function (code) { return { code: code, count: counts[code] }; })
-        .sort(function (a, b) { return b.count - a.count || a.code.localeCompare(b.code); });
-      var next = sorted.map(function (e) { return e.code; }).join(',');
-      if (next === signature) return;  // same operators in the same order — nothing to redraw
-      signature = next;
-      entries = sorted;
-      render();
-    });
-    App.on('filter', function (hidden) {
-      Array.prototype.forEach.call(container.querySelectorAll('.ct-legend-item'), function (item) {
-        item.classList.toggle('ct-legend-item--hidden', hidden.has(item.dataset.code));
-        item.title = itemTitle(item.dataset.code);
-      });
-    });
-  }
-
   initSearch();
   initTime();
   initFilters();
-  initLegend();
 })();

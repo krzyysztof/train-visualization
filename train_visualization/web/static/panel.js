@@ -1,10 +1,12 @@
 /*
  * Module: side panel details for the selected train (#details) — route with times, current
- * segment, ETA — plus the route polyline drawn on the map. Uses /api/trip/<trip_idx>.
+ * segment, ETA, a speed gauge + history sparkline and a whole-trip progress bar — plus the
+ * route polyline drawn on the map. Uses /api/trip/<trip_idx>.
  *
  * 'select'    -> fetch the trip, render header + stop list, draw the route (or restore the placeholder)
  * 'positions' -> re-fetch the trip and update only the progress bits (highlighted row, next-station line)
  * 'time'      -> same refresh for the new simulated time
+ * 'follow'    -> reflect follow.js's on/off state on the follow button
  * CSS prefix: pn-.
  */
 (function () {
@@ -52,6 +54,52 @@
     return minutes < 1 ? 'za chwilę' : 'za ' + minutes + ' min';
   }
 
+  // Ring gauge for the current speed estimate; 100% = GAUGE_MAX_KMH (the fastest category's
+  // cruise speed), so a slow regional train and a fast EIP visibly fill the ring differently.
+  var GAUGE_MAX_KMH = 200;
+  var SPARK_MAX_POINTS = 60; // ~60s of history at one poll/second
+  function speedGauge(kmh) {
+    var pct = Math.max(0, Math.min(100, (kmh / GAUGE_MAX_KMH) * 100));
+    var ring = el('div', 'pn-gauge-ring');
+    ring.style.setProperty('--pct', pct);
+    var center = el('div', 'pn-gauge-center');
+    center.appendChild(el('div', 'pn-gauge-num', String(Math.round(kmh))));
+    center.appendChild(el('div', 'pn-gauge-unit', 'km/h'));
+    ring.appendChild(center);
+    var wrap = el('div', 'pn-gauge');
+    wrap.appendChild(ring);
+    return wrap;
+  }
+
+  // Speed history sparkline: an SVG area+line built fresh each update from `history`
+  // (oldest first, capped in applyProgress), scaled 0..GAUGE_MAX_KMH like the gauge.
+  var SPARK_W = 280, SPARK_H = 44, SPARK_PAD = 2;
+  function renderSpark(history) {
+    var svgNS = 'http://www.w3.org/2000/svg';
+    var svg = document.createElementNS(svgNS, 'svg');
+    svg.setAttribute('viewBox', '0 0 ' + SPARK_W + ' ' + SPARK_H);
+    svg.setAttribute('class', 'pn-spark-svg');
+    svg.setAttribute('preserveAspectRatio', 'none');
+    var n = history.length;
+    if (n < 2) return svg;
+    var pts = history.map(function (v, i) {
+      var x = SPARK_PAD + (i / (n - 1)) * (SPARK_W - 2 * SPARK_PAD);
+      var frac = Math.max(0, Math.min(1, v / GAUGE_MAX_KMH));
+      var y = SPARK_H - SPARK_PAD - frac * (SPARK_H - 2 * SPARK_PAD);
+      return x.toFixed(1) + ' ' + y.toFixed(1);
+    });
+    var line = document.createElementNS(svgNS, 'polyline');
+    line.setAttribute('points', pts.join(' '));
+    line.setAttribute('class', 'pn-spark-line');
+    var area = document.createElementNS(svgNS, 'polyline');
+    area.setAttribute('points', pts[0].split(' ')[0] + ' ' + SPARK_H + ' ' + pts.join(' ') +
+      ' ' + pts[n - 1].split(' ')[0] + ' ' + SPARK_H);
+    area.setAttribute('class', 'pn-spark-area');
+    svg.appendChild(area);
+    svg.appendChild(line);
+    return svg;
+  }
+
   function operatorInfo(code) {
     var ops = App.state.meta ? App.state.meta.operators : [];
     for (var i = 0; i < ops.length; i++) {
@@ -66,6 +114,21 @@
     button.type = 'button';
     button.addEventListener('click', function () { App.select(null); });
     return button;
+  }
+
+  function followButton() {
+    var button = el('button', 'pn-follow', '');
+    button.type = 'button';
+    button.addEventListener('click', function () { Follow.toggle(); });
+    reflectFollow(button);
+    return button;
+  }
+
+  function reflectFollow(button) {
+    var on = Follow.isFollowing();
+    button.textContent = on ? '📍 Śledzenie' : '📍 Śledź';
+    button.title = on ? 'Przestań śledzić pociąg' : 'Mapa podąży za pociągiem';
+    button.classList.toggle('pn-follow--on', on);
   }
 
   function showMessage(text, closable) {
@@ -104,14 +167,42 @@
     title.appendChild(el('div', 'pn-train', (data.route ? data.route + ' ' : '') + data.num));
     title.appendChild(el('div', 'pn-rel', data.origin + ' → ' + data.dest));
     head.appendChild(title);
-    head.appendChild(closeButton());
+    var actions = el('div', 'pn-actions');
+    actions.appendChild(closeButton());
+    actions.appendChild(followButton());
+    head.appendChild(actions);
     details.appendChild(head);
 
     var next = el('p', 'pn-next');
     details.appendChild(next);
 
-    var speedLine = el('p', 'pn-speed');
+    var speedLine = el('div', 'pn-speed');
     details.appendChild(speedLine);
+
+    var sparkHolder = el('div', 'pn-spark-holder');
+    var spark = el('div', 'pn-chart');
+    spark.appendChild(el('div', 'pn-chart-title', 'Prędkość — ostatnie ~60 s'));
+    spark.appendChild(sparkHolder);
+    details.appendChild(spark);
+
+    var firstDep = data.stops[0].dep;
+    var tripSpan = data.stops[data.stops.length - 1].arr - firstDep;
+    var progressTrack = el('div', 'pn-progress-track');
+    var progressFill = el('div', 'pn-progress-fill');
+    progressTrack.appendChild(progressFill);
+    data.stops.forEach(function (stop, i) {
+      if (i === 0 || i === data.stops.length - 1) return;
+      var tick = el('span', 'pn-progress-tick');
+      tick.style.left = (tripSpan > 0 ? (stop.arr - firstDep) / tripSpan * 100 : 0) + '%';
+      tick.title = stop.name;
+      progressTrack.appendChild(tick);
+    });
+    var progressNow = el('span', 'pn-progress-now');
+    progressTrack.appendChild(progressNow);
+    var progressWrap = el('div', 'pn-chart');
+    progressWrap.appendChild(el('div', 'pn-chart-title', 'Postęp trasy'));
+    progressWrap.appendChild(progressTrack);
+    details.appendChild(progressWrap);
 
     var list = el('ol', 'pn-stops');
     var rows = data.stops.map(function (stop, i) {
@@ -124,7 +215,11 @@
     });
     details.appendChild(list);
 
-    view = { trip: data, list: list, rows: rows, next: next, speedLine: speedLine, hi: null, autoTop: 0, userScrolled: false };
+    view = {
+      trip: data, list: list, rows: rows, next: next, speedLine: speedLine, hi: null, autoTop: 0, userScrolled: false,
+      sparkHolder: sparkHolder, speedHistory: [],
+      firstDep: firstDep, tripSpan: tripSpan, progressFill: progressFill, progressNow: progressNow
+    };
     list.addEventListener('scroll', function () {
       // Anything other than our own programmatic scroll means the user took over.
       if (Math.abs(list.scrollTop - view.autoTop) > 1) view.userScrolled = true;
@@ -178,11 +273,26 @@
     view.next.classList.toggle('pn-idle', idle);
 
     if (current && !current.at_station) {
-      setContent(view.speedLine, '≈ ' + Math.round(current.speed_kmh) + ' km/h (szacowana)');
+      setContent(view.speedLine, [
+        speedGauge(current.speed_kmh),
+        el('p', 'pn-speed-caption', 'prędkość szacowana (fizyka + rozkład), nie GPS')
+      ]);
     } else if (current && current.at_station) {
-      setContent(view.speedLine, 'zatrzymany');
+      setContent(view.speedLine, el('p', 'pn-speed-caption pn-speed-stopped', '⏸ zatrzymany na stacji'));
     } else {
-      setContent(view.speedLine, '');
+      setContent(view.speedLine, []);
+    }
+
+    if (current) {
+      view.speedHistory.push(current.speed_kmh);
+      if (view.speedHistory.length > SPARK_MAX_POINTS) view.speedHistory.shift();
+      setContent(view.sparkHolder, [renderSpark(view.speedHistory)]);
+
+      var pct = view.tripSpan > 0
+        ? Math.max(0, Math.min(1, (current.now_sec - view.firstDep) / view.tripSpan)) * 100
+        : 0;
+      view.progressFill.style.width = pct + '%';
+      view.progressNow.style.left = pct + '%';
     }
 
     if (hi !== view.hi) {
@@ -275,6 +385,10 @@
 
   App.on('select', onSelect);
   App.on('positions', function () { refresh(); });
+  App.on('follow', function () {
+    var button = details.querySelector('.pn-follow');
+    if (button) reflectFollow(button);
+  });
   App.on('time', function () {
     generation++;        // a response for the old clock must not be applied any more
     wasRunning = false;  // the clock jumped, so "finished" can no longer be inferred

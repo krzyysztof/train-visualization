@@ -18,6 +18,13 @@
   display: none;
 }
 
+[data-theme="dark"] .leaflet-tooltip.ly-station-name {
+  color: #dcdfe6;
+  text-shadow:
+    0 0 2px #000, 0 0 2px #000, 0 0 3px #000,
+    1px 1px 0 #000, -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000;
+}
+
 /* Hover tooltip with the station name (zoom 11–13). */
 .leaflet-tooltip.ly-station-tip {
   padding: 3px 7px;

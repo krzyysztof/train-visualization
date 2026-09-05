@@ -9,6 +9,7 @@
  *   'filter'    (Set of op codes) -> hidden operators changed
  *   'zoom'      (zoomLevel)       -> map zoom finished
  *   'move'      (bounds)          -> map pan/zoom finished
+ *   'follow'    (boolean)         -> emitted by follow.js: is the map now tracking the selected train
  *
  * Shared state lives in App.state; modules must not mutate it directly — use the
  * setters below so the matching event fires for everyone.
