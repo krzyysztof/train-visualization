@@ -10,6 +10,9 @@ __pycache__/
 .DS_Store
 .venv/
 
+# Jednorazowe grafiki/raporty (np. analizy ruchu) — wygenerowane z danych, nie kod.
+puls-kolei.html
+
 # Dane wygenerowane przez skrypty w ml/ (kod, który je produkuje, zostaje śledzony).
 ml/dataset.csv
 ml/delay_pairs.csv

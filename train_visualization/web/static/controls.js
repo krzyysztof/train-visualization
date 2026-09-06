@@ -102,6 +102,8 @@
     function run(query) {
       lastQuery = query;
       var seq = ++requestSeq;
+      list.innerHTML = '';
+      list.appendChild(el('li', 'ct-empty muted', 'Szukam…'));
       var timeQuery = App.timeQuery();  // '?t=HH:MM' or '' — becomes the first parameter
       App.api('/api/search' + (timeQuery ? timeQuery + '&' : '?') + 'q=' + encodeURIComponent(query))
         .then(function (data) {

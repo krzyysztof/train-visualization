@@ -9,6 +9,7 @@
   --surface: #ffffff;         /* solid card/control background */
   --surface-alpha: rgba(255, 255, 255, 0.92); /* translucent overlay on the map */
   --halo: #ffffff;            /* text-shadow halo colour for labels drawn over the map */
+  --danger: #c0392b;
 }
 
 [data-theme="dark"] {
@@ -20,6 +21,7 @@
   --surface: #1c212b;
   --surface-alpha: rgba(28, 33, 43, 0.92);
   --halo: #05070a;
+  --danger: #ff6b5e;
 }
 
 * { box-sizing: border-box; }
@@ -106,6 +108,12 @@ body {
   color: var(--fg);
   font-size: 12px;
   pointer-events: none;
+}
+
+#status.status--error {
+  background: color-mix(in srgb, var(--danger) 16%, var(--surface-alpha));
+  color: var(--danger);
+  font-weight: 600;
 }
 
 .muted { color: var(--muted); }

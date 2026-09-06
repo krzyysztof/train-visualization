@@ -47,7 +47,10 @@ window.App = (function () {
   map.on('moveend', function () { emit('move', map.getBounds()); });
 
   var statusEl = document.getElementById('status');
-  function setStatus(text) { statusEl.textContent = text; }
+  function setStatus(text, isError) {
+    statusEl.textContent = text;
+    statusEl.classList.toggle('status--error', !!isError);
+  }
 
   function api(path) {
     return fetch(path, { cache: 'no-store' }).then(function (response) {
@@ -93,7 +96,7 @@ window.App = (function () {
       })
       .catch(function (err) {
         console.error(err);
-        setStatus('Brak połączenia z serwerem mapy — uruchom ponownie `python main.py`');
+        setStatus('Brak połączenia z serwerem — sprawdź, czy aplikacja nadal działa', true);
       })
       .then(function () { polling = false; });
   }
@@ -120,7 +123,7 @@ window.App = (function () {
       setInterval(poll, POLL_MS);
     }).catch(function (err) {
       console.error(err);
-      setStatus('Nie udało się wczytać /api/meta');
+      setStatus('Nie udało się wczytać danych — odśwież stronę', true);
     });
   }
 

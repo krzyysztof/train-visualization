@@ -37,6 +37,7 @@
 .pn-train {
   font-size: 16px;
   font-weight: 600;
+  overflow-wrap: anywhere;
 }
 
 .pn-rel {
@@ -67,6 +68,12 @@
 .pn-follow:hover {
   background: var(--bg);
   border-color: var(--muted);
+}
+
+.pn-close:active,
+.pn-follow:active {
+  background: var(--border);
+  transform: scale(0.96);
 }
 
 .pn-next {

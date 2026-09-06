@@ -32,6 +32,7 @@
   white-space: nowrap;
 }
 .ct-btn:hover { filter: brightness(1.08); }
+.ct-btn:active:not(:disabled) { filter: brightness(0.95); transform: scale(0.97); }
 .ct-btn--ghost { background: var(--surface); color: var(--accent); }
 .ct-btn:disabled { opacity: 0.45; cursor: default; filter: none; }
 
@@ -51,6 +52,7 @@
 }
 
 /* ---------- search ---------- */
+#search { position: relative; }
 .ct-search {
   display: flex;
   gap: 6px;
@@ -73,13 +75,20 @@
 }
 
 .ct-results {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  z-index: 20;
   list-style: none;
-  margin: 8px 0 0;
+  margin: 4px 0 0;
   padding: 0;
   max-height: 240px;
   overflow-y: auto;
+  background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 4px;
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.15);
 }
 .ct-results:empty { display: none; }
 .ct-result {
@@ -91,8 +100,12 @@
   cursor: pointer;
 }
 .ct-result:last-child { border-bottom: 0; }
-.ct-result:hover,
-.ct-result:focus { background: var(--ct-hover); outline: none; }
+.ct-result:hover { background: var(--ct-hover); }
+.ct-result:focus-visible {
+  background: var(--ct-hover);
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
 .ct-result--selected,
 .ct-result--selected:hover {
   background: color-mix(in srgb, var(--accent) 14%, var(--surface));
