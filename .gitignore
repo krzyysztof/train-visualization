@@ -27,3 +27,7 @@ overpass_railway_pl.json
 ml/opoznienia/delays.jsonl
 ml/opoznienia/.collector_state.json
 ml/opoznienia/mkuran_gtfs_page_snapshot.html
+
+# Wynik analyze_frequency.py (agregat policzony z delays.jsonl) — dane, nie kod.
+# Sam analyze_frequency.py ZOSTAJE śledzony.
+ml/opoznienia/frequency_stats.json
